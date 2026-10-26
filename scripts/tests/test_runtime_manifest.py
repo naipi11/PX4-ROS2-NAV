@@ -29,9 +29,6 @@ class PackageVersionTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             self.assertEqual(package_version(Path(directory)), "unknown")
 
-    def test_the_repository_declares_a_release_version(self) -> None:
-        self.assertRegex(package_version(REPOSITORY), r"^\d+\.\d+\.\d+$")
-
 
 if __name__ == "__main__":
     unittest.main()

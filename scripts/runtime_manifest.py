@@ -144,6 +144,9 @@ def create_manifest(args: argparse.Namespace) -> dict[str, Any]:
             "dirty": bool(status),
             "status_sha256": hashlib.sha256(status.encode("utf-8")).hexdigest(),
         },
+        # Set by the host runner after resolving the image used by docker run.
+        # Direct invocations outside that runner have no observed image ID.
+        "container_image": os.environ.get("DRONE_GAZEBO_DEV_IMAGE_ID", ""),
         "configuration": file_record(args.config, repository),
         "world": file_record(args.world, repository),
         "mission": {

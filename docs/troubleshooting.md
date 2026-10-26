@@ -150,3 +150,28 @@ Verify:
 A host that cannot present a window at all runs the same flight with
 `./scripts/bootstrap.sh --headless`, which writes the full record under
 `log/runs/`.
+
+### WSLg Taskbar Entries But Invisible Windows
+
+On WSL2, windows titled `[WARN:COPY MODE]` can have taskbar entries and valid
+screen coordinates while their contents remain invisible. Check the **latest**
+`RDP backend: use_gfxredir` entry in `/mnt/wslg/weston.log`; this log can contain
+multiple compositor startups. A value of `0` together with
+`rdp_allocate_shared_memory` reporting `Input/output error` matches the
+[WSLg shared-memory failure](https://github.com/microsoft/wslg/issues/1456),
+not a successful GUI launch or necessarily a simulator rendering failure.
+
+Stop the simulation and save work in all Ubuntu GUI applications first:
+restarting the compositor closes those applications. Keep an Ubuntu terminal
+open throughout recovery so the distribution stays running
+([installation notes](installation.md#supported-host)). From PowerShell, restart
+only the affected distribution's compositor:
+
+```powershell
+wsl.exe -d Ubuntu --system -- pkill -TERM -x weston
+```
+
+Replace `Ubuntu` if the project uses a different distribution. WSLg restarts
+Weston automatically. Confirm the new log entry says `use_gfxredir = 1`, then
+start the GUI simulation again. Verify actual rendered Gazebo and RViz
+contents and advancing simulation state, not just process or window handles.

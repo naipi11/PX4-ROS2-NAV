@@ -1,0 +1,12 @@
+[Unit]
+Description=PX4 ROS 2 urban navigation simulation
+After=graphical-session.target
+
+[Service]
+Type=exec
+WorkingDirectory=%h/projects/px4-ros2-drone-nav
+Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+ExecStart=/usr/bin/bash %h/projects/px4-ros2-drone-nav/scripts/sim_urban_point_to_point_gui.sh
+ExecStop=/usr/bin/bash %h/projects/px4-ros2-drone-nav/scripts/stop_sim.sh
+TimeoutStopSec=45
+KillMode=control-group

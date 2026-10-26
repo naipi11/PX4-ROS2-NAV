@@ -1,0 +1,13 @@
+[Unit]
+Description=PX4 noVNC browser viewer (SSH tunnel only)
+Requires=px4-nav-desktop.service
+After=px4-nav-desktop.service
+PartOf=px4-nav-desktop.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/websockify --web=/usr/share/novnc 127.0.0.1:6087 127.0.0.1:5907
+Restart=on-failure
+RestartSec=3
+UMask=0077
+NoNewPrivileges=true

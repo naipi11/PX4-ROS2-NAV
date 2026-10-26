@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# One-command setup of a fresh clone: the dev image, the PX4 checkout and its
-# SITL build, the workspace build and the urban environment assets, then the
+# One-command setup using the restored frozen dev image: the PX4 checkout and
+# its SITL build, the workspace build and the urban environment assets, then the
 # urban point-to-point simulation. Every step is skipped when its result is
 # already in place, so the script is safe to rerun.
 #
@@ -30,7 +30,7 @@ for argument in "$@"; do
   esac
 done
 
-image_name="${DRONE_GAZEBO_DEV_IMAGE:-drone-gazebo-dev:latest}"
+source "${repo_root}/scripts/dev_image.sh"
 px4_dir="${PX4_AUTOPILOT_DIR:-${repo_root}/external/PX4-Autopilot}"
 px4_binary="${px4_dir}/build/px4_sitl_default/bin/px4"
 workspace_setup="${repo_root}/install/setup.bash"
@@ -60,13 +60,11 @@ if ! command -v nvidia-smi >/dev/null 2>&1 ||
 fi
 echo "docker, git and the NVIDIA runtime are available."
 
-step "Dev image ${image_name}"
-if docker image inspect "${image_name}" >/dev/null 2>&1; then
-  echo "present"
-else
-  echo "building (this downloads ROS 2, Gazebo and px4_msgs; expect a while)"
-  "${repo_root}/scripts/build_dev_image.sh"
-fi
+step "Frozen dev image (or explicit override)"
+image_id="$(resolve_dev_image "${repo_root}")"
+# Pin all child invocations even if an override tag moves during bootstrap.
+export DRONE_GAZEBO_DEV_IMAGE="${image_id}"
+echo "present: ${image_id}"
 
 step "PX4 Autopilot at ${px4_dir}"
 if [[ -d "${px4_dir}/.git" ]]; then

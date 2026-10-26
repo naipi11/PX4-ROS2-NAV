@@ -7,7 +7,8 @@ user_gid="$(id -g)"
 container_home="/tmp/drone-gazebo-home-${user_uid}"
 container_runtime="/tmp/drone-gazebo-runtime-${user_uid}"
 container_xauthority="/tmp/drone-gazebo-xauthority-${user_uid}"
-image_name="${DRONE_GAZEBO_DEV_IMAGE:-drone-gazebo-dev:latest}"
+source "${repo_root}/scripts/dev_image.sh"
+image_id="$(resolve_dev_image "${repo_root}")"
 
 group_args=()
 if getent group render >/dev/null; then
@@ -34,8 +35,26 @@ env_args=(
   --env HOME="${container_home}"
   --env XDG_RUNTIME_DIR="${container_runtime}"
   # The resource record of a flight names the image it ran in.
-  --env DRONE_GAZEBO_DEV_IMAGE="${image_name}"
+  --env DRONE_GAZEBO_DEV_IMAGE="${image_id}"
+  --env DRONE_GAZEBO_DEV_IMAGE_ID="${image_id}"
 )
+
+# WSLg OpenGL uses Mesa's D3D12 bridge, independently of CUDA device access.
+# The existing privileged device access exposes /dev/dxg; Mesa also needs the
+# host's bridge libraries and Windows driver store to avoid CPU rendering.
+wsl_graphics_args=()
+if [[ -e /dev/dxg && -f /usr/lib/wsl/lib/libd3d12.so ]]; then
+  wsl_graphics_args+=(--volume /usr/lib/wsl:/usr/lib/wsl:ro)
+  env_args+=(
+    --env LD_LIBRARY_PATH=/usr/lib/wsl/lib
+    --env GALLIUM_DRIVER=d3d12
+    --env MESA_D3D12_DEFAULT_ADAPTER_NAME="${MESA_D3D12_DEFAULT_ADAPTER_NAME:-NVIDIA}"
+  )
+else
+  # Native NVIDIA OpenGL needs the graphics and display driver libraries;
+  # --gpus alone exposes only compute and utility capabilities.
+  env_args+=(--env NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics,display)
+fi
 
 # A GUI run needs the X server to accept the container. The container has its
 # own HOME, so it carries no authority cookie of its own and would need an
@@ -195,6 +214,7 @@ docker run --rm "${tty_args[@]}" \
   --volume "${repo_root}:/workspace:rw" \
   --volume /tmp/.X11-unix:/tmp/.X11-unix:ro \
   "${xauthority_args[@]}" \
+  "${wsl_graphics_args[@]}" \
   --workdir /workspace \
-  "${image_name}" \
+  "${image_id}" \
   bash -c "${container_command}" bash "$@"

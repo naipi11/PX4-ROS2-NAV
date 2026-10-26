@@ -15,3 +15,8 @@ external/
 *.db3
 *.log
 rosbag2_*/
+.remote-sim-managed
+deployment/local/
+artifacts/
+.env
+.env.*

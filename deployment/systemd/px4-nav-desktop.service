@@ -1,0 +1,14 @@
+[Unit]
+Description=PX4 native X11 desktop viewer (SSH tunnel only)
+ConditionPathExists=%t/gdm/Xauthority
+ConditionPathExists=%h/.config/px4-nav/desktop-passwd
+
+[Service]
+Type=simple
+Environment=DISPLAY=:1
+Environment=XAUTHORITY=%t/gdm/Xauthority
+ExecStart=/usr/bin/x11vnc -display :1 -auth %t/gdm/Xauthority -rfbauth %h/.config/px4-nav/desktop-passwd -rfbport 5907 -listen 127.0.0.1 -no6 -noipv6 -forever -shared -noxdamage -repeat -nosel -noremote -desktop PX4-RTX5080
+Restart=on-failure
+RestartSec=3
+UMask=0077
+NoNewPrivileges=true

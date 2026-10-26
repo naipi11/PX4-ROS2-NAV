@@ -2,6 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "${repo_root}/scripts/dev_image.sh"
 
 normalize_bool() {
   local value="${1}"
@@ -25,7 +26,7 @@ clean_stale_processes_dry_run="$(
   normalize_bool "${DRONE_GAZEBO_CLEAN_STALE_DRY_RUN:-false}"
 )"
 container_stop_timeout_s="${DRONE_GAZEBO_CONTAINER_STOP_TIMEOUT_S:-2}"
-dev_image_name="${DRONE_GAZEBO_DEV_IMAGE:-drone-gazebo-dev:latest}"
+dev_image_id=""
 docker_command_timeout_s="${DRONE_GAZEBO_DOCKER_COMMAND_TIMEOUT_S:-4}"
 
 for arg in "$@"; do
@@ -72,11 +73,11 @@ container_belongs_to_repository() {
   local identity_text
   identity_text="$(
     timeout "${docker_command_timeout_s}s" docker inspect \
-      --format '{{.Config.Image}} {{range .Mounts}}{{.Source}} {{end}}' \
+      --format '{{.Image}} {{range .Mounts}}{{.Source}} {{end}}' \
       "${container_id}" 2>/dev/null || true
   )"
-  [[ "${identity_text}" == *"${dev_image_name}"* ||
-    "${identity_text}" == *"${repo_root} "* ]]
+  [[ ( -n "${dev_image_id}" && "${identity_text}" == "${dev_image_id} "* ) ||
+    "${identity_text}" == *" ${repo_root} "* ]]
 }
 
 container_has_simulation_processes() {
@@ -113,6 +114,10 @@ stop_stale_simulation_containers() {
     echo "Simulation container cleanup: docker not found, skipping"
     return 0
   fi
+
+  # Still clean repository-mounted containers if the image has been removed.
+  dev_image_id="$(resolve_dev_image "${repo_root}" timeout "${docker_command_timeout_s}s")" ||
+    dev_image_id=""
 
   local container_ids=()
   mapfile -t container_ids < <(

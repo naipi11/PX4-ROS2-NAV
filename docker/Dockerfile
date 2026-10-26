@@ -37,7 +37,41 @@ RUN curl -fsSL https://packages.osrfoundation.org/gazebo.gpg \
     && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/pkgs-osrf-archive-keyring.gpg] https://packages.osrfoundation.org/gazebo/ubuntu-stable ${UBUNTU_CODENAME} main" \
         > /etc/apt/sources.list.d/gazebo-stable.list
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+ARG APT_MIRROR_ROOT=""
+
+RUN --mount=type=cache,id=drone-nav-apt-archives,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,id=drone-nav-apt-lists,target=/var/lib/apt/lists,sharing=locked <<'INSTALL_ROS'
+set -euo pipefail
+if [[ -n "${APT_MIRROR_ROOT}" ]]; then
+    python3 - "${APT_MIRROR_ROOT}" <<'PY'
+from pathlib import Path
+import sys
+
+root = sys.argv[1].rstrip("/")
+source_dir = Path("/etc/apt/sources.list.d")
+sources = [Path("/etc/apt/sources.list"), *source_dir.glob("*.list"), *source_dir.glob("*.sources")]
+for path in sources:
+    if not path.is_file():
+        continue
+    original = path.read_text()
+    updated = original
+    for scheme in ("http", "https"):
+        for host, suffix in (("archive.ubuntu.com/ubuntu", "ubuntu"),
+                             ("security.ubuntu.com/ubuntu", "ubuntu"),
+                             ("packages.ros.org/ros2/ubuntu", "ros2/ubuntu")):
+            updated = updated.replace(f"{scheme}://{host}", f"{root}/{suffix}")
+    if "packages.ros.org/ros2/ubuntu" in original and path.suffix == ".sources":
+        updated = "".join(
+            "Types: deb\n" if line.startswith("Types:") else line
+            for line in updated.splitlines(keepends=True)
+        )
+    if updated != original:
+        path.write_text(updated)
+PY
+fi
+mv /etc/apt/apt.conf.d/docker-clean /tmp/drone-docker-clean
+apt-get -o Acquire::Retries=10 update
+apt-get -o Acquire::Retries=10 install -y --no-install-recommends \
         gz-harmonic \
         libzstd-dev \
         python3-colcon-common-extensions \
@@ -59,8 +93,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         ros-${ROS_DISTRO}-std-msgs \
         ros-${ROS_DISTRO}-tf2-ros \
         ros-${ROS_DISTRO}-visualization-msgs \
-        ros-${ROS_DISTRO}-xacro \
-    && rm -rf /var/lib/apt/lists/*
+        ros-${ROS_DISTRO}-xacro
+mv /tmp/drone-docker-clean /etc/apt/apt.conf.d/docker-clean
+rm -rf /var/lib/apt/lists/*
+INSTALL_ROS
 
 RUN curl -fsSL -o /tmp/cuda-keyring.deb \
         https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb \

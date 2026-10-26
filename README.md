@@ -37,21 +37,24 @@ uncut in real time, as recorded for v0.5.0 (October 2026).
 
 ## Quick Start
 
-On a Linux host with Docker, git and the NVIDIA container runtime, one script
-prepares a fresh clone and starts the urban point-to-point simulation:
+On a Linux host with Docker, git and the NVIDIA container runtime, first restore
+the frozen source, dev image and scene dependencies using
+[`docs/build_and_run.md`](docs/build_and_run.md#frozen-deployment-baselines).
+Then, from that checkout:
 
 ```bash
-git clone https://github.com/formiat/px4-ros2-drone-nav.git
-cd px4-ros2-drone-nav
 ./scripts/bootstrap.sh
 ```
 
-It builds the dev image, clones PX4 Autopilot into `external/`, builds PX4
-SITL and the workspace inside the container, fetches the versioned urban
-environment assets, and launches the Gazebo GUI flight. `--headless` runs the
+It requires the locally restored image in `docker/dev-image.lock`, prepares PX4
+under `external/` if absent, builds SITL and the workspace inside the container,
+prepares the versioned urban environment assets, and launches the Gazebo GUI.
+`--headless` runs the
 same flight headless with the mission check; `--no-run` only prepares. Every
 step is skipped when its result already exists, so the script can be rerun.
-The first run downloads several gigabytes and builds for tens of minutes.
+Missing locked images fail with restoration guidance rather than silently using
+`latest`. A deliberate new image build is a different dependency baseline; see
+[`docs/installation.md`](docs/installation.md#restore-or-deliberately-rebuild-the-dev-image).
 Every scenario the repository can run, with one command and a description of
 what it shows, is listed in [`docs/scenarios.md`](docs/scenarios.md).
 

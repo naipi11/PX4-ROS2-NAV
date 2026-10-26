@@ -78,3 +78,8 @@ Thumbs.db
 .env
 .env.*
 !.env.example
+
+# Deployment-local identity, credentials and retained snapshots
+/.remote-sim-managed
+/deployment/local/
+/artifacts/baselines/
