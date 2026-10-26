@@ -108,10 +108,10 @@ stop the remote simulation; use the stop launcher or command explicitly.
 
 ## Frozen Deployment Baselines
 
-The first deployment baseline is named `baseline-20261026`, on development branch
-`deployment/baseline-20261026`, derived from upstream `v0.5.0`
-(`3973331c463f1c96c78c47bb9d12b441675b96b8`). It preserves the deployed navigation
-algorithms and parameters; it is not a claim of completing the ten-flight
+The first restore-verified deployment baseline is named `baseline-20261026-r2`,
+on development branch `deployment/baseline-20261026`, derived from upstream
+`v0.5.0` (`3973331c463f1c96c78c47bb9d12b441675b96b8`). It preserves the deployed
+navigation algorithms and parameters; it is not a claim of completing the ten-flight
 navigation acceptance series.
 
 | Item | Versioned source | Generated or host-private state |
@@ -134,10 +134,10 @@ host, outside the checkout, with no concurrent source or dependency edits:
 
 ```bash
 python3 scripts/deployment_baseline.py capture \
-  /home/jd/px4-nav-baselines/baseline-20261026 \
+  /home/jd/px4-nav-baselines/baseline-20261026-r2 \
   --run-directory log/runs/RUN_ID
 python3 scripts/deployment_baseline.py verify \
-  /home/jd/px4-nav-baselines/baseline-20261026
+  /home/jd/px4-nav-baselines/baseline-20261026-r2
 ```
 
 Use the real run directory in place of `RUN_ID`; omit `--run-directory` only for
@@ -145,6 +145,10 @@ a snapshot without flight evidence. Capture refuses dirty source, a running
 simulation, an unavailable locked image, or evidence from another commit/image.
 It never overwrites a previous snapshot. A partial directory without
 `baseline.json` is not a completed baseline.
+Capture also requires the completed PX4 SITL build's downloaded OpticalFlow
+source and download receipts. Do not remove them before capture. Schema v1
+snapshots omitted this build-directory dependency and cannot restore a complete
+SITL build offline; the verifier rejects that schema.
 
 The snapshot contains:
 
@@ -152,6 +156,11 @@ The snapshot contains:
 - `dependencies.tar.gz`: PX4 source/submodule state and installed/derived scene
   assets, excluding the PX4 build tree. No network fetch is needed to restore
   these bytes.
+- `px4-downloads.tar.gz`: OpticalFlow source, its KLT submodule and the two
+  ExternalProject download receipts. These are build inputs stored under PX4's
+  `build/`, not compiled outputs. The receipts prevent CMake from discarding the
+  saved checkout and cloning a mutable branch. They are tied to the saved
+  container's CMake and the runner's canonical `/workspace` mount.
 - `dev-image.tar.gz`: the actual immutable Docker image, not a Dockerfile rebuild.
 - `packages.tsv`, `px4-submodules.txt`, optional per-host colcon defaults, and
   `baseline.json` with commit, image ID, host versions, PX4 status, sizes and
@@ -173,11 +182,12 @@ working checkout. The final service installation expects the standard project
 location above; an isolated restore can be inspected or built elsewhere:
 
 ```bash
-BASELINE=/home/jd/px4-nav-baselines/baseline-20261026
+BASELINE=/home/jd/px4-nav-baselines/baseline-20261026-r2
 RESTORE=/home/jd/px4-nav-baselines/restore-check
 mkdir "$RESTORE"
 tar -xzf "$BASELINE/source.tar.gz" -C "$RESTORE"
 tar -xzf "$BASELINE/dependencies.tar.gz" -C "$RESTORE"
+tar -xzf "$BASELINE/px4-downloads.tar.gz" -C "$RESTORE"
 docker load --input "$BASELINE/dev-image.tar.gz"
 git -C "$RESTORE" rev-parse HEAD
 ```

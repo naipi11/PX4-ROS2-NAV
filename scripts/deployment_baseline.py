@@ -13,9 +13,15 @@ from pathlib import Path
 from runtime_manifest import atomic_write_json, file_record, read_manifest, sha256_file
 
 REPOSITORY = Path(__file__).resolve().parents[1]
-SCHEMA = "drone_city_nav_deployment_baseline_v1"
+SCHEMA = "drone_city_nav_deployment_baseline_v2"
 PX4 = Path("external/PX4-Autopilot")
 ENVIRONMENTS = Path("external/environment-artifacts")
+OPTICAL_FLOW_PREFIX = PX4 / "build/px4_sitl_default/OpticalFlow"
+OPTICAL_FLOW_SOURCE = OPTICAL_FLOW_PREFIX / "src/OpticalFlow"
+OPTICAL_FLOW_RECEIPTS = (
+    OPTICAL_FLOW_PREFIX / "src/OpticalFlow-stamp/OpticalFlow-gitinfo.txt",
+    OPTICAL_FLOW_PREFIX / "src/OpticalFlow-stamp/OpticalFlow-gitclone-lastrun.txt",
+)
 
 
 def command(*arguments: str, cwd: Path = REPOSITORY) -> str:
@@ -61,6 +67,15 @@ def capture(destination: Path, run_directory: Path | None) -> None:
         raise RuntimeError("docker/dev-image.lock must identify the installed immutable image")
     px4 = repository_record(REPOSITORY / PX4)
     submodules = command("git", "submodule", "status", "--recursive", cwd=REPOSITORY / PX4)
+    # ExternalProject downloads source under build/. Keep that source and its
+    # download receipts, not its CMake cache, objects, libraries or install tree.
+    optical_flow = repository_record(REPOSITORY / OPTICAL_FLOW_SOURCE)
+    optical_flow_submodules = command(
+        "git", "submodule", "status", "--recursive", cwd=REPOSITORY / OPTICAL_FLOW_SOURCE
+    )
+    for receipt in OPTICAL_FLOW_RECEIPTS:
+        if not (REPOSITORY / receipt).is_file():
+            raise FileNotFoundError(f"missing PX4 download receipt: {receipt}; build px4_sitl before capture")
     run = None
     if run_directory is not None:
         run = read_manifest(run_directory / "manifest.json")
@@ -91,6 +106,15 @@ def capture(destination: Path, run_directory: Path | None) -> None:
         check=True,
     )
     artifacts.append(file_record(destination / "dependencies.tar.gz", destination))
+
+    print("Archiving OpticalFlow source, submodules and download receipts", flush=True)
+    subprocess.run(
+        ["tar", "-czf", str(destination / "px4-downloads.tar.gz"),
+         str(OPTICAL_FLOW_SOURCE), *(str(path) for path in OPTICAL_FLOW_RECEIPTS)],
+        cwd=REPOSITORY,
+        check=True,
+    )
+    artifacts.append(file_record(destination / "px4-downloads.tar.gz", destination))
 
     print(f"Exporting immutable container {image_id}", flush=True)
     save_image(image_id, destination / "dev-image.tar.gz")
@@ -138,12 +162,20 @@ def capture(destination: Path, run_directory: Path | None) -> None:
         raise RuntimeError("source changed during capture; incomplete directory is not a baseline")
     if command("git", "submodule", "status", "--recursive", cwd=REPOSITORY / PX4) != submodules:
         raise RuntimeError("PX4 submodule checkouts changed during capture")
+    if repository_record(REPOSITORY / OPTICAL_FLOW_SOURCE) != optical_flow or command(
+        "git", "submodule", "status", "--recursive", cwd=REPOSITORY / OPTICAL_FLOW_SOURCE
+    ) != optical_flow_submodules:
+        raise RuntimeError("OpticalFlow source changed during capture")
     document = {
         "schema": SCHEMA,
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
         "repository": source,
         "container_image": image_id,
         "px4": px4,
+        "px4_optical_flow": {
+            "repository": optical_flow,
+            "submodules": optical_flow_submodules,
+        },
         "host": {
             "kernel": command("uname", "-srmo"),
             "docker": command("docker", "version", "--format", "{{.Server.Version}}"),
