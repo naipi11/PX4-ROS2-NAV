@@ -89,7 +89,14 @@ else
       ;;
   esac
   echo "building px4_sitl inside the dev container (expect 10 to 20 minutes)"
-  "${repo_root}/scripts/container_run.sh" make -C "${px4_container_dir}" px4_sitl
+  px4_make_args=()
+  # PX4's first Ninja configuration deletes build/, including restored
+  # ExternalProject sources. Use Make for fresh/restored trees; preserve an
+  # existing Ninja tree rather than switching its configured generator.
+  if [[ ! -f "${px4_dir}/build/px4_sitl_default/build.ninja" ]]; then
+    px4_make_args+=(NO_NINJA_BUILD=1)
+  fi
+  "${repo_root}/scripts/container_run.sh" make -C "${px4_container_dir}" "${px4_make_args[@]}" px4_sitl
 fi
 
 step "Workspace build (colcon, drone_city_nav)"

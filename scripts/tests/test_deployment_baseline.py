@@ -44,13 +44,13 @@ class BaselineIntegrityTest(unittest.TestCase):
             with self.assertRaises(FileNotFoundError):
                 verify(root)
 
-    def test_rejects_schema_without_px4_build_downloads(self) -> None:
+    def test_rejects_schema_without_all_px4_build_downloads(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()
             self.create_snapshot(root)
             manifest = root / "baseline.json"
             document = json.loads(manifest.read_text())
-            document["schema"] = "drone_city_nav_deployment_baseline_v1"
+            document["schema"] = "drone_city_nav_deployment_baseline_v2"
             manifest.write_text(json.dumps(document))
             with self.assertRaisesRegex(ValueError, "unsupported"):
                 verify(root)

@@ -13,15 +13,14 @@ from pathlib import Path
 from runtime_manifest import atomic_write_json, file_record, read_manifest, sha256_file
 
 REPOSITORY = Path(__file__).resolve().parents[1]
-SCHEMA = "drone_city_nav_deployment_baseline_v2"
+SCHEMA = "drone_city_nav_deployment_baseline_v3"
 PX4 = Path("external/PX4-Autopilot")
 ENVIRONMENTS = Path("external/environment-artifacts")
-OPTICAL_FLOW_PREFIX = PX4 / "build/px4_sitl_default/OpticalFlow"
-OPTICAL_FLOW_SOURCE = OPTICAL_FLOW_PREFIX / "src/OpticalFlow"
-OPTICAL_FLOW_RECEIPTS = (
-    OPTICAL_FLOW_PREFIX / "src/OpticalFlow-stamp/OpticalFlow-gitinfo.txt",
-    OPTICAL_FLOW_PREFIX / "src/OpticalFlow-stamp/OpticalFlow-gitclone-lastrun.txt",
-)
+PX4_BUILD = PX4 / "build/px4_sitl_default"
+PX4_DOWNLOAD_PREFIXES = {
+    "OpticalFlow": PX4_BUILD / "OpticalFlow",
+    "microcdr": PX4_BUILD / "src/modules/uxrce_dds_client/src/libmicroxrceddsclient_project-build/microcdr",
+}
 
 
 def command(*arguments: str, cwd: Path = REPOSITORY) -> str:
@@ -33,6 +32,28 @@ def repository_record(path: Path) -> dict[str, str]:
         "commit": command("git", "rev-parse", "HEAD", cwd=path),
         "status": command("git", "status", "--porcelain=v1", "--untracked-files=all", cwd=path),
     }
+
+
+def px4_download_records() -> dict[str, dict]:
+    records = {}
+    for name, prefix in PX4_DOWNLOAD_PREFIXES.items():
+        source = prefix / "src" / name
+        receipts = [
+            prefix / "src" / f"{name}-stamp" / f"{name}-{suffix}.txt"
+            for suffix in ("gitinfo", "gitclone-lastrun")
+        ]
+        for receipt in receipts:
+            if not (REPOSITORY / receipt).is_file():
+                raise FileNotFoundError(
+                    f"missing PX4 download receipt: {receipt}; build px4_sitl before capture"
+                )
+        records[name] = {
+            "source": str(source),
+            "repository": repository_record(REPOSITORY / source),
+            "submodules": command("git", "submodule", "status", "--recursive", cwd=REPOSITORY / source),
+            "receipts": [str(path) for path in receipts],
+        }
+    return records
 
 
 def save_image(image_id: str, destination: Path) -> None:
@@ -69,13 +90,7 @@ def capture(destination: Path, run_directory: Path | None) -> None:
     submodules = command("git", "submodule", "status", "--recursive", cwd=REPOSITORY / PX4)
     # ExternalProject downloads source under build/. Keep that source and its
     # download receipts, not its CMake cache, objects, libraries or install tree.
-    optical_flow = repository_record(REPOSITORY / OPTICAL_FLOW_SOURCE)
-    optical_flow_submodules = command(
-        "git", "submodule", "status", "--recursive", cwd=REPOSITORY / OPTICAL_FLOW_SOURCE
-    )
-    for receipt in OPTICAL_FLOW_RECEIPTS:
-        if not (REPOSITORY / receipt).is_file():
-            raise FileNotFoundError(f"missing PX4 download receipt: {receipt}; build px4_sitl before capture")
+    downloads = px4_download_records()
     run = None
     if run_directory is not None:
         run = read_manifest(run_directory / "manifest.json")
@@ -107,10 +122,10 @@ def capture(destination: Path, run_directory: Path | None) -> None:
     )
     artifacts.append(file_record(destination / "dependencies.tar.gz", destination))
 
-    print("Archiving OpticalFlow source, submodules and download receipts", flush=True)
+    print("Archiving OpticalFlow and Micro-CDR source, submodules and download receipts", flush=True)
     subprocess.run(
         ["tar", "-czf", str(destination / "px4-downloads.tar.gz"),
-         str(OPTICAL_FLOW_SOURCE), *(str(path) for path in OPTICAL_FLOW_RECEIPTS)],
+         *(path for record in downloads.values() for path in (record["source"], *record["receipts"]))],
         cwd=REPOSITORY,
         check=True,
     )
@@ -162,20 +177,15 @@ def capture(destination: Path, run_directory: Path | None) -> None:
         raise RuntimeError("source changed during capture; incomplete directory is not a baseline")
     if command("git", "submodule", "status", "--recursive", cwd=REPOSITORY / PX4) != submodules:
         raise RuntimeError("PX4 submodule checkouts changed during capture")
-    if repository_record(REPOSITORY / OPTICAL_FLOW_SOURCE) != optical_flow or command(
-        "git", "submodule", "status", "--recursive", cwd=REPOSITORY / OPTICAL_FLOW_SOURCE
-    ) != optical_flow_submodules:
-        raise RuntimeError("OpticalFlow source changed during capture")
+    if px4_download_records() != downloads:
+        raise RuntimeError("PX4 build download sources changed during capture")
     document = {
         "schema": SCHEMA,
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
         "repository": source,
         "container_image": image_id,
         "px4": px4,
-        "px4_optical_flow": {
-            "repository": optical_flow,
-            "submodules": optical_flow_submodules,
-        },
+        "px4_build_downloads": downloads,
         "host": {
             "kernel": command("uname", "-srmo"),
             "docker": command("docker", "version", "--format", "{{.Server.Version}}"),
