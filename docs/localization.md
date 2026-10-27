@@ -3,10 +3,12 @@
 Where the vehicle's position and heading come from, per localization
 profile, and how the two estimators that replace GNSS and the magnetometer,
 lidar-inertial odometry (LIO) and visual-inertial odometry (VIO, a stereo
-MSCKF), work, are initialised, report their health and are measured. Both
-correct their drift against a map of their own, which makes the pair a SLAM
-system in the broad sense: localization and mapping at once, with map-based
-relocalization and no pose graph or global optimization.
+MSCKF), work, are initialised, report their health and are measured. VIO
+aligns depth against older cells of its own map; LIO registers scans against
+a sliding local submap. These are local map-alignment mechanisms, not a
+pose graph, global optimization or global place-recognition system.
+The recorded simulation results below do not establish robust loop closure,
+recovery from arbitrary pose loss or real-aircraft SLAM acceptance.
 The autopilot's EKF2 remains the owner of the estimate in every profile:
 obstacle memory, the controller and the offboard node read
 `/fmu/out/vehicle_local_position_v1` and `/fmu/out/vehicle_attitude`, and
@@ -70,9 +72,10 @@ Per scan:
 3. point-to-plane Gauss-Newton registration against a sliding submap of
    the last 40 keyframes in a voxel hash, normals fitted over two rings,
    the IMU pose as the starting guess, a robust width of 0.2 m; a failed
-   registration is retried from the last registered pose with the
-   correspondence widened three times, and until one registers the
-   position holds there while the attitude follows the gyroscope;
+   registration is retried from the last registered position carried by its
+   velocity for at most 2 s, with the same configured correspondence distance
+   (1 m), not a widened search. While registration is lost, the position
+   follows that bounded carry and the attitude follows the gyroscope;
 4. the registered position updates position and velocity in a Kalman step:
    the IMU's motion is the prior with white acceleration noise, the
    registration the measurement, its variance from the registration's
@@ -172,10 +175,11 @@ Known limits, measured: the flights that failed while the estimator was
 being set (r386, r387, r399) all lost the track along the corridor at
 x 30 to 62, y -15, where the walls leave the corridor's axis with 0.002
 to 0.05 of information per point and the IMU carries it; the estimate
-drifts 0.08 to 0.22 m there on the accepted flights. Loop closure is not
-implemented: over the 400 m mission the drift does not grow with the
-flight's length (the error at the goal, 0.1 to 0.2 m, is the corridor's,
-not the distance's), so it stays the next line of roadmap item 13.
+drifts 0.08 to 0.22 m there on the accepted flights. LIO has no global loop
+closure: it registers against the retained local keyframes, not a global
+place-recognition or pose-graph backend. On that historical 400 m mission
+the goal error was 0.1 to 0.2 m; this is a measured result, not a bound on
+drift over arbitrary routes or distances.
 
 ## The Visual-Inertial Estimator
 
@@ -225,10 +229,13 @@ drifted at most 0.53 m per 100 m (r781).
 images (`gazebo_stereo_depth_node` or `stereo_depth_node`, switch
 `--visual-inertial-odometry`), so two 1.2 MB frames 7.5 times a second reach
 it without a copy. A frame waits for the autopilot's IMU up to its own stamp,
-in order. The estimator and the camera perception read the same frames; of
-the perception's products the estimator reads the depth cloud alone, for a
-map of its own (below), and never the obstacle memory: an estimator that took
-its pose from a map built from that pose would hide its own drift.
+in order. The estimator and the camera perception read the same frames.
+The estimator also reads `/stereo_depth/points`, the combined stereo and
+six-ToF returns cloud, for a map of its own (below), never the obstacle
+memory. It has no raw `/tof/down/points` subscription or downward-only
+localization path: surface returns from all six ToFs can reach map alignment
+through the combined cloud. This is distinct from a direct ToF range update
+in the MSCKF, which is not implemented.
 
 What the recorded flights set (`tools/vio`, records in `log/tools/vio`: a recorder of every frame,
 both IMU streams and the true pose on one clock; a replay of the tracker and
@@ -257,9 +264,11 @@ the filter; reports by manoeuvre):
   vehicle can do, and a point the cloned poses cannot agree on is placed by
   the newest frame's own pair. Without these one 0.52 s hole refused every
   feature for the rest of a flight;
-- the time-of-flight ranges are not fused: climbing a shaft a metre from its
-  wall the estimate loses 0.09 m over 3.4 m (0.28 m over 3.9 m on the record
-  with IMU holes), the vertical being the best-held axis.
+- direct time-of-flight range measurements are not fused into the MSCKF
+  (the combined cloud is used separately for map alignment): climbing a
+  shaft a metre from its wall the estimate loses 0.09 m over 3.4 m
+  (0.28 m over 3.9 m on the record with IMU holes), the vertical being the
+  best-held axis.
 
 Over four seconds, the time a surface stays in view, the estimate loses
 0.11 to 0.18 m at the median and 0.25 to 0.45 m at p95, and 0.2 to 0.3
@@ -387,8 +396,10 @@ below, and a dark stretch in the estimator's first seconds on the pad.
 Roadmap item 19 flew the mission out and back and measured the drift of a
 doubled path: 0.40 to 4.10 m at the end of 854 to 1467 m on eighteen camera
 flights, and r689 flew into the launch platform with the estimate 4.07 m off.
-Where the vehicle returns to ground it has seen, the drift is now bounded by
-registering the depth against a map the estimator keeps.
+Where the vehicle returns to ground it has seen, local alignment can reduce
+drift by registering the combined depth/ToF cloud against a map the estimator
+keeps. It requires overlap with sufficiently old mapped geometry and a nearby
+pose prior; it is not global relocalization after arbitrary tracking loss.
 
 The map is the lidar-inertial estimator's: cells of points with a plane fitted
 through each and a point-to-plane registration against them, moved into one
@@ -399,9 +410,15 @@ surfaces within 6 m in 0.4 m cells, at most 3000 points, and lays it into the
 map by its corrected pose; every 0.5 s it registers the current depth against
 the cells laid more than 20 s before, never against what it has just laid,
 which carries the drift of the pose it was laid from. A registration counts
-when most of the depth matched old cells (0.3 and at least 150 points), the
-fit is tight (0.25 m) and an axis carries information per point above the
-lidar estimator's floor.
+when the registration converges, at least 30 percent of the cloud and at
+least 150 points match old cells, the fit is tight (RMS at most 0.25 m) and an
+axis carries information per point above the lidar estimator's floor.
+
+Only measured surface returns enter that map. The combined cloud's `intensity`
+is a category, not brightness: `0` is a free ray, `1` is a measured surface, and
+`2` is unobservable space. Free rays and unobservable markers are not geometric
+features for VIO registration; the latter still retain their separate
+navigation-safety meaning in obstacle memory.
 
 The correction is an offset from the filter's frame to the map's, kept
 outside the filter: the filter's position is certain to a few centimetres

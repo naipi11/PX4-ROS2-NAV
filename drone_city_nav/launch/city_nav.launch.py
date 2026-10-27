@@ -108,8 +108,8 @@ def stereo_vision_nodes(
     visual_inertial_overrides,
     image_topic_suffix,
 ):
-    """The vision path of roadmap item 14: the pair's images and the
-    time-of-flight scans bridged to ROS and depth recovered from them. In
+    """The vision path: images taken directly from Gazebo inside the stereo
+    process, depth recovered there, and six ToF clouds bridged to ROS. In
     shadow a second obstacle memory integrates those returns on topics of its
     own beside the lidar's, and nothing consumes it; otherwise the launch's one
     obstacle memory is the vision memory and this adds no memory of its own.
@@ -787,7 +787,7 @@ def generate_launch_description():
                 description=(
                     "What the vehicle navigates on, and whose observability the "
                     "speed law and the gaze answer to: stereo_tof (a forward "
-                    "pair and two time-of-flight sensors, roadmap item 14; the "
+                    "pair and six 8 x 8 time-of-flight sensors; the "
                     "lidar is absent from the vehicle) or lidar (the whole "
                     "sphere)."
                 ),

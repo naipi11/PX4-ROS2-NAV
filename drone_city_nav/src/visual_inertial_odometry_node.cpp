@@ -569,7 +569,10 @@ private:
     sensor_msgs::PointCloud2ConstIterator<float> surface{cloud, "intensity"};
     for (; x != x.end(); ++x, ++y, ++z, ++surface) {
       const Eigen::Vector3d flu{*x, *y, *z};
-      if (*surface < 0.5F || !flu.allFinite() || flu.norm() > kMapRangeM) {
+      // The shared cloud uses 0 for free rays, 1 for surfaces and 2 for
+      // unobservable space. Only measured surfaces can anchor registration.
+      if (!(*surface >= 0.5F && *surface < 1.5F) || !flu.allFinite() ||
+          flu.norm() > kMapRangeM) {
         continue;
       }
       body.push_back(Eigen::Vector3d{flu.x(), -flu.y(), -flu.z()} + left_camera_body_);

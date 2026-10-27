@@ -7,10 +7,12 @@ The main package is `drone_city_nav`, an ament CMake package built with
 An autonomous UAV, a PX4 quadrotor in offboard mode, navigates GNSS-denied
 indoor and underground spaces with no prior map. It localizes by stereo
 visual-inertial odometry (VIO, a stereo MSCKF) or, on the lidar profile, by
-lidar-inertial odometry (LIO), each correcting its drift by relocalization
-against a map of its own — SLAM in the broad sense, with no pose graph or
-global optimization. It maps obstacles into a 3D voxel occupancy grid built
-in flight, plans with a persistent D* Lite 3D path planner, and avoids
+lidar-inertial odometry (LIO). VIO aligns depth against older cells in its own
+map; LIO registers scans against a sliding local submap. This is localization
+and mapping in the broad sense, not a pose-graph or globally optimized SLAM
+system, and does not establish robust loop closure. It maps obstacles into a
+3D voxel occupancy grid built in flight, plans with a persistent D* Lite 3D
+path planner, and avoids
 collisions with a GPU MPPI local planner (model predictive path integral, a
 sampling-based MPC) under a braking contract tied to the measured sensor
 range. Simulated in Gazebo Harmonic with PX4 SITL on the DARPA SubT Urban
@@ -105,8 +107,9 @@ on physical drones without a separate safety review, hardware-specific failsafe
 design, controlled test environment, and compliance with local regulations.
 No onboard computer has run it: the resource figures are from a workstation
 ([docs/resource_budget.md](docs/resource_budget.md)). By default the vehicle
-carries no lidar: it navigates on a forward stereo pair and two time-of-flight
-sensors ([docs/camera_perception.md](docs/camera_perception.md)), and it flies
+carries no navigation lidar: it navigates on a forward stereo pair and six
+8 x 8 time-of-flight sensors (up, down, front, back, left and right;
+[docs/camera_perception.md](docs/camera_perception.md)), and it flies
 without GNSS: a visual-inertial estimator on the same pair replaces the
 simulated GNSS, the magnetometer and the simulation heading source
 (`LOCALIZATION_PROFILE=visual_inertial`, the default,
@@ -326,11 +329,12 @@ flight (`ENABLE_STATIC_MAP=true`) needs a 3D static occupancy of its
 environment (`STATIC_OCCUPANCY_3D_PATH`); none exists yet, so the request
 refuses to start until roadmap item 11 delivers one.
 
-Since roadmap item 14 closed, every simulation entry point flies on cameras:
+The default sensor pipeline is stereo, introduced in roadmap item 14:
 `CAMERA_PROFILE=stereo_tof` mounts a forward stereo pair (1280 x 960, 120
-degrees, 0.20 m baseline, 7.5 Hz) and two 8 x 8 time-of-flight sensors looking
-up and down, and `NAVIGATION_SENSOR_PROFILE=stereo_tof` navigates on them with
-the lidar absent from the vehicle model
+degrees, 0.20 m baseline, 7.5 Hz) and six 8 x 8 time-of-flight sensors looking
+up, down, front, back, left and right. `NAVIGATION_SENSOR_PROFILE=stereo_tof`
+navigates on their combined returns with the navigation lidar absent from the
+vehicle model
 ([`docs/camera_perception.md`](docs/camera_perception.md)). The 3D lidar
 remains available on request:
 
@@ -367,7 +371,7 @@ The sensor set is visible in the GUI and the position source is not. With the
 lidar the vehicle carries the sensor, RViz shows a full spherical scan, the
 obstacle memory fills in every direction to about 35 m and the flights run at
 2.4 to 2.7 m/s; with the cameras there is a forward depth cone about 6.4 m
-deep and two small time-of-flight cones, memory grows only where the vehicle
+deep and six small time-of-flight cones, memory grows only where the vehicle
 has looked, the vehicle turns to face where it is going, and the flights run at
 1.5 to 1.8 m/s. GNSS changes only what EKF2 fuses as its position, so the
 airframe, the sensors, the world and every RViz layer look the same; where it
@@ -375,8 +379,11 @@ shows is the records, in the profile the runtime manifest names and in how far
 the true position stood from the goal at its acknowledgement.
 
 `CAMERA_PROFILE=stereo_tof NAVIGATION_SENSOR_PROFILE=lidar` flies on the lidar
-with the vision path in shadow beside it. `LIDAR_PROFILE=3d` still names the
-3D perception pipeline and the vehicle wrapper either way. On the camera
+with the vision path in shadow beside it. `LIDAR_PROFILE=3d` selects the
+supported lidar variant, not whether the navigation lidar is mounted.
+The legacy `x500_lidar_3d` wrapper/model name remains on both profiles;
+runtime model preparation removes its lidar include for
+`NAVIGATION_SENSOR_PROFILE=stereo_tof`. On the camera
 profile the headless flights run on the textured GUI world instead of the
 collision-only sensor world, which a camera sees nothing of, and
 single-vehicle flights default to the `visual_inertial` localization profile:

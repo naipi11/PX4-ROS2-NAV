@@ -17,38 +17,66 @@ latched after altitude capture and the configured hover interval.
 
 ## Horizon Execution
 
-Each accepted horizon is validated for:
+Each non-revoked horizon is validated for:
 
-- increasing sequence;
+- the current target offboard session and an admissible producer/sequence identity;
 - `map` frame;
 - at least two finite points;
 - a valid time window;
 - every point and hold target inside `1.0 <= z < 32.0 m`;
 - a finite stationary-hold target when requested.
 
-At 50 Hz, offboard selects the horizon time at:
+On its nominal 20 ms node-clock timer (50 Hz; simulation time in SITL), offboard
+selects the trajectory sample time at:
 
 ```text
-now - valid_from + control_lookahead
+now - valid_from + mppi_control_lookahead_s
 ```
 
-It interpolates velocity, acceleration, vertical motion, yaw, and yaw rate
-between neighboring samples and publishes a PX4 trajectory setpoint.
+It interpolates position, velocity and acceleration, transforms them from `map`
+into PX4's local frame, and publishes a trajectory-position-tracking setpoint.
+During planned motion the yaw setpoint is NaN: PX4 receives the yaw rate sampled
+`mppi_yaw_rate_lead_s` later than the trajectory sample (0.26 s by default), not a
+simultaneous planned yaw target. This is the rate-loop compensation in specification
+K17. Stationary and terminal position holds can still supply a yaw target.
+
+Sequences advance within a producer instance, not globally across process restarts.
+Explicit revocation uses its own empty-payload contract; it does not carry a new
+moving trajectory or authorize force-disarm.
 
 ## Applied-Control Feedback
 
-The acceleration and yaw-rate command actually selected by offboard is
-published back to MPPI. The next MPPI update uses it to limit the first control
-and avoid command discontinuities.
+`/drone_city_nav/mppi/applied_control` carries `MppiControlFeedback` emitted by
+**offboard after publishing its selected setpoint**. It is not a PX4 command ACK,
+motor output, or measurement of the vehicle's response.
+
+- `acceleration` is the selected trajectory acceleration in the declared frame
+  (`map` by default).
+- `yaw_rate_radps` is the lead-sampled yaw-rate command sent to PX4.
+- `yaw_acceleration_radps2` is the horizon acceleration at the trajectory sample,
+  without the yaw-rate lead. MPPI uses it for control continuity; PX4 does not
+  receive it as a trajectory-setpoint field.
+- Producer/session identity, horizon sequence, stamp, execution mode and
+  `control_authoritative` determine whether the planner can use the witness for
+  its current owner and control continuity.
+
+Exact stationary-hold witnesses and cooperative prestart receipts are
+non-authoritative for trajectory-control seeding. A zero horizon identity is
+only an offboard-session heartbeat; it must not be read as a horizon ACK or
+revocation. Vehicle state is supplied separately through the PX4 state topics.
 
 ## Expired Or Missing Horizons
 
-If no fresh horizon exists:
+The finite path includes a validated terminal rest state. After its deadline,
+offboard holds that terminal position rather than extrapolating its moving
+samples. An expired explicit stationary hold keeps its target. With no such
+terminal target, offboard pins an admissible position using its local hold logic,
+sending braking-hold setpoints while moving before holding the pinned position.
+These fallback holds emit a session heartbeat, not authoritative evidence that
+the expired horizon is still being executed.
 
-- moving vehicle: dynamically decelerate;
-- nearly stopped vehicle: hold current position.
-
-The old horizon is not extended beyond its validity deadline.
+Planner-health loss and dead-reckoning landing have their own higher-priority
+branches; expiration alone is not a new dynamic-braking planner.
 
 ## Constrained Route Execution
 

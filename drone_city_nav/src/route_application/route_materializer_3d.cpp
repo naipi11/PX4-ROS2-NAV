@@ -167,7 +167,8 @@ RouteMaterializer3D::materialize(RouteMaterializationRequest3D request) const {
       .execution_time_search_complete = plan.execution_time_search_complete,
       .incumbent_available = plan.incumbent_available,
   };
-  route.reaches_mission_goal = spatial_route.valid();
+  route.reaches_mission_goal = telemetry.planner.executable &&
+                               spatialRouteCandidateReachesGoal3D(spatial_route.source);
   route.planner_executable = telemetry.planner.executable;
   materialization.continuation_validation_ms = 0.0;
   route.fingerprint = routeFingerprint(candidate.route);
@@ -463,8 +464,8 @@ RouteMaterializer3D::materialize(RouteMaterializationRequest3D request) const {
             ? std::span<const RouteSample3D>{*active_route->geometry->route}
             : std::span<const RouteSample3D>{},
         *mutable_route, mission_goal,
-        config_.route_extension.minimum_endpoint_improvement_m, spatial_route.valid(),
-        config_.flight_envelope, result.replacement_policy);
+        config_.route_extension.minimum_endpoint_improvement_m,
+        route.reaches_mission_goal, config_.flight_envelope, result.replacement_policy);
   } else {
     result.validation = StaticRouteCandidateValidation{
         .status = StaticRouteCandidateStatus::kInvalidInput,

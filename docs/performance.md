@@ -5,6 +5,16 @@ commit; CUDA MPPI is a smaller share than any of them.
 
 ## The Planning Cycle Budget
 
+The configured planning rate is 50 Hz: a nominal 20 ms **node-clock** period,
+not a guarantee that a callback finishes or runs 50 times per wall-clock second.
+In simulation the node clock follows `/clock`, including the run's
+`REAL_TIME_FACTOR`. Compute budgets and measured durations use the monotonic
+clock (specification K24). `execution_maximum_assembly_ms=12.0` bounds horizon
+assembly, not the complete planning cycle. Assess actual deadline misses,
+source ages and host validity from the run; configuration alone is not real-time
+performance evidence. The measurements below are historical run results, not
+benchmarks of the current deployment host.
+
 A planning tick is snapshot preparation, the controller, and publication
 (assembly, commit, wire). The controller is the part with a GPU in it and the
 smallest part of the cycle: measured at p50 around 7 ms against a 20 ms period,

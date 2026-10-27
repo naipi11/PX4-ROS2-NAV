@@ -12,15 +12,33 @@ the correction is recorded beside it.
 
 - **Sensors** (`models/stereo_tof_v1`, [`gazebo_simulation.md`](gazebo_simulation.md)):
   a forward pair of 1280 x 960 cameras, 120 degrees, 0.20 m baseline, 7.5 Hz,
-  and two 8 x 8 time-of-flight sensors, 45 by 45 degrees, 2.8 m, looking up
-  and down; roadmap item 17 stage 4 added four more on the horizontal, front,
-  back, left and right, a bumper all round whose zones enter the obstacle
-  memory as the vertical ones' do. With them the flown path observed before
+  and six 8 x 8 time-of-flight sensors, 45 by 45 degrees, 2.8 m, looking up,
+  down, front, back, left and right. Item 14 introduced the vertical pair;
+  roadmap item 17 stage 4 added the four horizontal sensors, a bumper all
+  round whose zones enter the obstacle memory as the vertical ones' do.
+  With them the flown path observed before
   it was entered is 99.9 percent, 0.6 m of 475 m unseen, the ring observing
   14.9 percent (r784; 99.8 percent and 1.0 m before, r781): the horizon's
   lateral deviations into unknown space the register carried (C2) are
   closed by that number. `NAVIGATION_SENSOR_PROFILE=stereo_tof` removes the lidar from the
   vehicle model.
+- **Current transport and consumers** (`launch/sensor_profile.py`,
+  `src/gazebo_stereo_depth_main.cpp`, `src/stereo_depth_node.cpp`): all six
+  Gazebo `tof_<direction>/scan/points` topics cross `ros_gz_bridge` as
+  `sensor_msgs/msg/PointCloud2` on `/tof/<direction>/points` (vehicle-prefixed
+  in multi-vehicle launches). The stereo process subscribes directly to
+  Gazebo images and relays them in-process to the matcher and, when enabled,
+  VIO; images do not use that bridge. The matcher combines stereo depth with
+  the nearest available scan from each of the six ToFs in
+  `/stereo_depth/points`, which feeds obstacle memory. VIO also reads this
+  combined cloud for its own map alignment, not the obstacle memory.
+  It has no separate downward-ToF range subscription or direct range update
+  in the MSCKF; accepted ToF returns from any direction can enter its map
+  ([`localization.md`](localization.md)).
+  The ToFs are simulated as small `gpu_lidar` grids; "without lidar" here
+  means without the separate 3D navigation lidar. The legacy
+  `x500_lidar_3d` vehicle name and `LIDAR_PROFILE=3d` do not imply that sensor
+  is mounted: runtime preparation removes it for stereo navigation.
 - **Depth** (`stereo_depth_node`): semi-global matching, far field at full
   resolution over 64 disparities and near field at half resolution over 128,
   110 ms on two CPU threads. Disparity error 0.11 to 0.17 px at the median,

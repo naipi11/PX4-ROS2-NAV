@@ -253,7 +253,8 @@ RoutePlannerUpdate3D RoutePlanner3D::update(
         transaction.world->static_occupancy.get(), config_.planner.physical_footprint,
         config_.planner.flight_envelope);
     SegmentEvidence3D evidence = evaluateSegmentEvidence3D(
-        intent, route, continuation_session->search_start, true, true,
+        intent, route, continuation_session->search_start, true,
+        spatialRouteCandidateReachesGoal3D(spatial_route.source),
         spatial_route.estimated_execution_time_s, evidence_world);
     result.improved_incumbent = RouteSearchCandidate3D{
         .search_start = continuation_session->search_start,

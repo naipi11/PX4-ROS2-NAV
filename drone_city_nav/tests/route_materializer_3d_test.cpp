@@ -1,3 +1,7 @@
+#include "drone_city_nav/compiled_trajectory_3d.hpp"
+#include "drone_city_nav/mission_goal_capture.hpp"
+#include "drone_city_nav/route_execution_contract_3d.hpp"
+
 #include <gtest/gtest.h>
 
 #include <cstddef>
@@ -10,6 +14,7 @@
 
 #include "production_mppi_route_world.hpp"
 #include "route_materializer_3d.hpp"
+#include "route_trajectory_compiler_3d.hpp"
 
 namespace drone_city_nav {
 namespace {
@@ -71,9 +76,17 @@ fixture(const StaticRouteSearchRequestIdentity request =
                 .base_route_generation = 0U,
             },
         const RouteReleaseReason3D release_reason = RouteReleaseReason3D::kNone,
-        const bool invalid_derived_distances = false) {
+        const bool invalid_derived_distances = false,
+        const bool partition_goal = false) {
   const GridBounds3D bounds{0.0, 0.0, 0.0, 1.0, 16, 16, 8};
   auto occupancy = std::make_shared<OccupancyGrid3D>(bounds, 71U);
+  if (partition_goal) {
+    for (int y = 0; y < bounds.height_cells; ++y) {
+      for (int z = 0; z < bounds.depth_cells; ++z) {
+        occupancy->setOccupied({8, y, z});
+      }
+    }
+  }
   const std::uint64_t revision = occupancy->fingerprint();
   const std::uint64_t occupied_fingerprint = occupancy->contentFingerprint();
   auto world = std::make_shared<WorldSnapshot3D>();
@@ -226,8 +239,13 @@ TEST(RouteMaterializer3DTest,
   ASSERT_NE(input.transaction, nullptr);
   RouteMaterializer3D materializer{materializerConfig()};
 
+  RouteSearchCandidate3D candidate = plannerCandidate(input.transaction);
+  ASSERT_TRUE(candidate.spatial_route.valid());
+  ASSERT_TRUE(spatialRouteCandidateReachesGoal3D(candidate.spatial_route.source));
+  EXPECT_TRUE(candidate.evidence.planner_executable);
+  EXPECT_TRUE(candidate.evidence.reaches_mission_target);
   const ProductionRouteMaterialization3D result =
-      materializer.materialize(requestFor(input, plannerCandidate(input.transaction)));
+      materializer.materialize(requestFor(input, std::move(candidate)));
 
   EXPECT_TRUE(result.validation.accepted);
   EXPECT_EQ(result.route.world, input.world);
@@ -240,6 +258,156 @@ TEST(RouteMaterializer3DTest,
   EXPECT_TRUE(result.telemetry.planner.invoked);
   EXPECT_DOUBLE_EQ(result.telemetry.world_build.build_ms, 12.5);
   EXPECT_FALSE(result.geometry_optimization_fallback.has_value());
+  EXPECT_TRUE(result.telemetry.planner.executable);
+  EXPECT_TRUE(result.route.planner_executable);
+  EXPECT_TRUE(result.route.reaches_mission_goal);
+  EXPECT_TRUE(result.route.segment_evidence.reaches_mission_target);
+  EXPECT_EQ(routeEndpointSemantics3D(result.route.reaches_mission_goal, true),
+            RouteEndpointSemantics3D::kMissionStop);
+  EXPECT_EQ(routeEndpointSemantics3D(result.route.reaches_mission_goal, false),
+            RouteEndpointSemantics3D::kContinuation);
+  const StaticRouteExtensionDecision extension = evaluateStaticRouteExtension(
+      materializerConfig().route_extension,
+      StaticRouteExtensionObservation{
+          .route_generation = result.route.candidate_generation,
+          .route_remaining_m = 0.0,
+          .route_reaches_mission_goal = result.route.reaches_mission_goal,
+      });
+  ASSERT_TRUE(extension.valid);
+  EXPECT_FALSE(extension.request_extension);
+
+  MissionGoalCaptureLatch capture{MissionGoalCaptureConfig{}};
+  mppi::State state{};
+  state.x = static_cast<float>(vehicleState().position.x);
+  state.y = static_cast<float>(vehicleState().position.y);
+  state.z = static_cast<float>(vehicleState().position.z);
+  EXPECT_FALSE(capture
+                   .update(MissionGoalCaptureObservation{
+                       .mission_goal = result.route.objective.goal,
+                       .state = state,
+                       .terminal_route_available = result.route.reaches_mission_goal,
+                   })
+                   .latched);
+  state.x = static_cast<float>(result.route.objective.goal.x);
+  state.y = static_cast<float>(result.route.objective.goal.y);
+  state.z = static_cast<float>(result.route.objective.goal.z);
+  EXPECT_TRUE(capture
+                  .update(MissionGoalCaptureObservation{
+                      .mission_goal = result.route.objective.goal,
+                      .state = state,
+                      .terminal_route_available = result.route.reaches_mission_goal,
+                  })
+                  .newly_latched);
+}
+
+TEST(RouteMaterializer3DTest,
+     ClosestApproachStaysExecutableWithoutClaimingMissionGoalReach) {
+  // The wall closes the lattice completely. Drive the real persistent planner
+  // until it offers the raw-valid closest approach, without changing its source.
+  const MaterializerFixture3D input = fixture(
+      StaticRouteSearchRequestIdentity{
+          .kind = StaticRouteSearchRequestKind::kInitial,
+      },
+      RouteReleaseReason3D::kNone, false, true);
+  ASSERT_NE(input.transaction, nullptr);
+  RoutePlannerConfig3D config = plannerConfig();
+  config.planner.feasibility_first_enabled = true;
+  config.planner.maximum_feasibility_compute_time_ms = 500.0;
+  config.planner.maximum_feasibility_expansions_per_update = 100000U;
+  config.planner.escape_search_maximum_probes_per_update = 1U << 16U;
+  RoutePlanner3D planner{config};
+  RoutePlannerUpdate3D update = planner.update(*input.transaction, vehicleState());
+  ASSERT_EQ(update.planner_input_status, PlannerInputStatus3D::kAccepted);
+  for (int attempt = 0; attempt < 120 && !update.improved_incumbent; ++attempt) {
+    update = planner.update(*input.transaction, vehicleState(), update.planner_session);
+  }
+  ASSERT_TRUE(update.improved_incumbent.has_value())
+      << "frontier_exhausted="
+      << update.planner_telemetry.feasibility_frontier_exhausted
+      << " escape_exhausted=" << update.planner_telemetry.escape_search_exhausted;
+  RouteSearchCandidate3D candidate = std::move(*update.improved_incumbent);
+  ASSERT_TRUE(candidate.spatial_route.valid());
+  ASSERT_EQ(candidate.spatial_route.source,
+            SpatialRouteCandidateSource3D::kFeasibilityClosestApproach);
+  ASSERT_FALSE(spatialRouteCandidateReachesGoal3D(candidate.spatial_route.source));
+  ASSERT_LT(candidate.spatial_route.points.back().x, 8.0);
+  EXPECT_TRUE(candidate.evidence.planner_executable);
+  EXPECT_TRUE(candidate.evidence.physical_executable);
+  EXPECT_FALSE(candidate.evidence.reaches_mission_target);
+
+  const RouteMaterializerConfig3D materializer_config = materializerConfig();
+  RouteMaterializer3D materializer{materializer_config};
+  const ProductionRouteMaterialization3D result =
+      materializer.materialize(requestFor(input, candidate));
+  ASSERT_TRUE(result.validation.accepted);
+  ASSERT_NE(result.route.route, nullptr);
+  EXPECT_TRUE(result.telemetry.planner.executable);
+  EXPECT_TRUE(result.route.planner_executable);
+  EXPECT_FALSE(result.route.reaches_mission_goal);
+  EXPECT_FALSE(result.route.segment_evidence.reaches_mission_target);
+  const RouteEndpointSemantics3D semantics =
+      routeEndpointSemantics3D(result.route.reaches_mission_goal, true);
+  EXPECT_EQ(semantics, RouteEndpointSemantics3D::kContinuation);
+  EXPECT_FALSE(routeEndpointHasTerminalStop3D(semantics));
+  EXPECT_TRUE(routeEndpointUsesLocalBoundary3D(semantics));
+  const StaticRouteExtensionDecision extension = evaluateStaticRouteExtension(
+      materializer_config.route_extension,
+      StaticRouteExtensionObservation{
+          .route_generation = result.route.candidate_generation,
+          .route_remaining_m = 0.0,
+          .route_reaches_mission_goal = result.route.reaches_mission_goal,
+      });
+  ASSERT_TRUE(extension.valid);
+  EXPECT_TRUE(extension.request_extension);
+
+  // Even a stationary estimate at the goal cannot turn a partial-route claim
+  // into a terminal-route witness for the capture latch.
+  MissionGoalCaptureLatch capture{MissionGoalCaptureConfig{}};
+  mppi::State state{};
+  state.x = static_cast<float>(result.route.objective.goal.x);
+  state.y = static_cast<float>(result.route.objective.goal.y);
+  state.z = static_cast<float>(result.route.objective.goal.z);
+  EXPECT_FALSE(capture
+                   .update(MissionGoalCaptureObservation{
+                       .mission_goal = result.route.objective.goal,
+                       .state = state,
+                       .terminal_route_available = result.route.reaches_mission_goal,
+                   })
+                   .latched);
+
+  // The same partial endpoint is not an improvement over resident geometry.
+  // This comparison needs geometry only, not an activation/certification claim.
+  RouteTrajectoryCompilerConfig3D compiler_config;
+  compiler_config.trajectory.physical_footprint =
+      materializer_config.physical_footprint;
+  compiler_config.trajectory.physical_footprint.perimeter_samples = 8U;
+  compiler_config.trajectory.physical_footprint.radial_rings = 1U;
+  compiler_config.trajectory.physical_footprint.axial_samples = 1U;
+  RouteTrajectoryCompiler3D compiler{compiler_config};
+  const RouteTrajectoryCompilationResult3D compiled =
+      compiler.compile(RouteTrajectoryCompilationRequest3D{
+          .materialized = result.route,
+          .exact_initial_state =
+              VehicleState3D{
+                  .identity = {.revision = 5U,
+                               .source_timestamp_us = 7U,
+                               .receive_stamp_ns = 11},
+                  .position = vehicleState().position,
+              },
+          .endpoint_semantics = semantics,
+          .observed_raw_world = nullptr,
+      });
+  ASSERT_TRUE(compiled.compiled())
+      << compiledTrajectoryFailureReason3DName(compiled.validation.reason);
+  auto active = std::make_shared<CertifiedRouteSuffix3D>();
+  active->geometry = compiled.trajectory;
+  RouteMaterializationRequest3D repeated = requestFor(input, std::move(candidate), 9U);
+  repeated.active_route = std::move(active);
+  const ProductionRouteMaterialization3D unchanged =
+      materializer.materialize(std::move(repeated));
+  EXPECT_EQ(unchanged.validation.status,
+            StaticRouteCandidateStatus::kNoEndpointImprovement);
+  EXPECT_FALSE(unchanged.validation.accepted);
 }
 
 TEST(RouteMaterializer3DTest,

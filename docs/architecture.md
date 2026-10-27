@@ -171,7 +171,8 @@ compiled as the first and only include in an independent translation unit.
 - executes safety and mission position holds when explicitly requested;
 - holds the current admissible position when no finite path or explicit hold
   command has provided an executable terminal state;
-- publishes the applied-control feedback used by MPPI continuity logic;
+- publishes an offboard setpoint-publication witness for MPPI continuity logic,
+  not a PX4 acknowledgement or measured actuator response;
 - accepts typed destruction events for its configured role and mission epoch;
 - owns the only force-disarm command path, after a valid destruction event;
 - publishes the RViz drone marker and follow TF.
@@ -192,8 +193,9 @@ and provide derived distance and passage evidence, but neither can override raw
 occupied evidence.
 
 No-static production planning requires revisioned observed Occupancy3D produced
-from timestamped 3D lidar. A recentered distance resource may accelerate local
-queries, while the persistent route graph itself is sparse and survives compatible
+from timestamped stereo/ToF returns by default, or 3D lidar on the lidar profile.
+A recentered distance resource may accelerate local queries, while the persistent
+route graph itself is sparse and survives compatible
 world revisions. The raw occupied set plus the drone's swept physical footprint is
 the only hard collision boundary in both profiles.
 
@@ -229,9 +231,10 @@ footprint is raw-collision-free.
 `PersistentDStarLitePlanner3D` is the single production strategic route producer.
 It searches `(x, y, z)`, incrementally repairs changed occupied evidence, and uses
 the shared `FlightTimeModel3D` for anisotropic translation and bounded turn time.
-`PlannerUpdate3D` admits a complete feasible incumbent independently from its
-`SearchProgress3D`. A publishable incumbent can therefore be activated while a
-typed `RoutePlannerSession3D` preserves the exact request and requeues bounded
+`PlannerUpdate3D` admits a raw-valid incumbent independently from its
+`SearchProgress3D`. A publishable incumbent can proceed to materialization and
+activation checks while a typed `RoutePlannerSession3D` preserves the exact request
+and requeues bounded
 D* repair and execution-time refinement until convergence or no-route.
 `RoutePlanner3D`, rather than the ROS node, owns the one persistent planner and
 turns an immutable search transaction plus a controller-neutral vehicle state
@@ -244,6 +247,17 @@ available; bounded anytime continuations use keep-pending and therefore cannot
 displace newer work. The coordinator validates world generation, full-3D depth,
 route-generation currency, and vehicle availability and emits typed update or
 rejection events without ROS dependencies.
+
+Route validity is not goal reach. A `kFeasibilityClosestApproach` candidate is
+a usable partial path, not a path to the mission goal. Its segment evidence and
+materialized `reaches_mission_goal` remain false; endpoint validation must still
+require improvement over a resident partial route. It remains eligible for
+extension and uses continuation endpoint semantics, including the existing
+certified-reserve gate, not the mission-stop exemption. Even a genuinely
+goal-reaching route is not arrival: capture separately requires the vehicle's
+position, speed and execution evidence, and the flight check judges arrival in
+simulation truth.
+
 `RouteMaterializer3D` receives one owned request containing the exact planner
 transaction, candidate, active certified route, current position, and raw-world
 snapshot. It owns constrained-span construction, splice-preserving geometry
@@ -350,9 +364,9 @@ leaves the radius: the route takes it back inside, where resting captures the
 goal once more.
 
 The finite cooperative traffic mission runs one complete navigation stack per
-vehicle: a separate PX4 DDS namespace, planner, offboard node, lidar safety
+vehicle: a separate PX4 DDS namespace, planner, offboard node, sensor safety
 input, cooperative agent, and destruction state. No-static navigation maintains
-independent persistent lidar memory for every vehicle. The mission has no
+independent persistent obstacle memory for every vehicle. The mission has no
 ground-truth data path into navigation:
 
 ```text
@@ -385,7 +399,7 @@ paths remain visible concurrently. Selector-gated lidar debug nodes retain pose
 and latest-map context for every scenario vehicle, but only the current
 spectator projects scans, integrates diagnostic memory, writes a bounded startup
 snapshot, and publishes detailed lidar layers. Non-selected vehicles continue
-publishing their latest physical lidar returns for finite-path validation.
+publishing their latest physical sensor returns for finite-path validation.
 These visualization-only nodes share the diagnostics component container; their
 outputs never participate in route selection or vehicle control.
 
@@ -405,7 +419,7 @@ mission records its result only after every destroyed vehicle is settled and
 every survivor confirms a stationary position hold. Headless runs then shut down
 deterministically; GUI runs keep the terminal world alive.
 
-Each vehicle's lidar pipeline filters returns belonging to peers whose flight
+Each vehicle's sensor-return pipeline filters returns belonging to peers whose flight
 intents it receives, before obstacle-memory integration. This prevents a moving
 peer from becoming a persistent environmental obstacle; it does not introduce a
 prohibited zone or relax collision checks against raw physical occupancy.
@@ -425,8 +439,12 @@ prohibited zone or relax collision checks against raw physical occupancy.
 Offboard executes only the current fresh horizon. There is no legacy path-id,
 suffix ACK, partial-replan, safe-truncation, or moving/after-hold protocol.
 
-Horizon supersession is monotonic. Offboard acknowledges every accepted horizon
-through `MppiControlFeedback` with the horizon sequence it executes. A new plan
+Horizon supersession is monotonic within the admitted producer identity. Offboard
+witnesses selected horizon setpoint publication through `MppiControlFeedback`;
+accepting a horizon alone is not proof that PX4 or the vehicle applied it. The
+feedback's session, horizon identity and authority distinguish planned controls,
+exact non-authoritative hold/prestart receipts, and zero-identity heartbeats
+([drone_control.md](drone_control.md#applied-control-feedback)). A new plan
 replaces the resident owner when that owner is witnessed by applied-control
 evidence, when offboard has acknowledged the owner or its predecessor, or when
 the configured acknowledgement grace has elapsed since publication; only a

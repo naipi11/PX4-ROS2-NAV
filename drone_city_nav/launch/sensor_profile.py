@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """The navigation sensor profiles: what the vehicle carries and whose
-observability the speed law and the gaze answer to. The stereo pair with the
-two time-of-flight sensors (roadmap item 14) is the default; the 3D lidar
-remains available on request."""
+observability the speed law and the gaze answer to. The stereo pair with six
+8 x 8 time-of-flight sensors (up, down, front, back, left and right) is the
+default; the 3D navigation lidar remains available on request."""
 
 from __future__ import annotations
 
@@ -16,9 +16,10 @@ DEFAULT_NAVIGATION_SENSOR_PROFILE = "stereo_tof"
 # pair recovers depth it can stand behind out to 6.4 m (disparity error 0.45 px
 # at p90, a quarter-metre voxel) inside 60 degrees either side of the heading
 # and 52.4 degrees above and below the horizon (120 degrees on a 4:3 imager);
-# each time-of-flight sensor sees 2.8 m inside 22.5 degrees of the vertical. A
-# motion the vehicle does not face answers to what memory has observed along
-# it; a faced motion between the two fields is held to the unobserved speed. A
+# the up/down time-of-flight pair sees 2.8 m inside 22.5 degrees of the
+# vertical. The four horizontal ToFs also feed obstacle memory. A motion the
+# vehicle does not face answers to what memory has observed along it; a
+# faced motion between the two fields is held to the unobserved speed. A
 # vertical approach keeps 1.0 m: the body's half height (0.35 m), the vertical
 # estimate error, a voxel and the tracking error, where the 2.0 m of a
 # horizontal one is sized by the 0.82 m envelope.
@@ -100,13 +101,16 @@ def stereo_tof_topics(
     vehicle_prefix: str = "",
     image_topic_suffix: str = "",
 ):
-    """How one vehicle's camera set reaches its depth node: (bridge arguments,
-    bridge remaps, parameters of the `gazebo_stereo_depth_node` process). Only
-    the two time-of-flight clouds cross the ROS-Gazebo bridge; the pair's
-    images are taken from Gazebo inside the depth node's process, because the
-    bridge of two 1280 x 960 streams stalled the simulator. The returns topic
-    is the vision memory's input. A suffix names the topics an evaluation relay
-    republishes the images on, the camera driver's input then."""
+    """How one vehicle's sensor set reaches its depth node: (bridge arguments,
+    bridge remaps, parameters of the `gazebo_stereo_depth_node` process). All
+    six time-of-flight clouds cross the ROS-Gazebo bridge as PointCloud2 on
+    `<vehicle_prefix>/tof/{up,down,front,back,left,right}/points`. The pair's
+    images are taken directly from Gazebo inside the depth node's process,
+    because bridging two 1280 x 960 streams stalled the simulator. The returns
+    topic combines stereo depth and ToF rays for obstacle memory and, when
+    enabled, the visual-inertial estimator's map alignment. A suffix names the
+    topics an evaluation relay republishes the images on, the camera driver's
+    input then."""
     sensor_prefix = (
         f"/world/{world_name}/model/{model_name}/link/stereo_tof_link/sensor"
     )
