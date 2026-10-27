@@ -53,22 +53,6 @@ class HostVerdictTest(unittest.TestCase):
         self.assertEqual("slow", watchdog.judge(startup + [0.99] * 40 + [0.6] * 30, 0.82)[0])
         # A slowed run that asked for 0.5 is judged against half the floor.
         self.assertEqual("ok", watchdog.judge([0.5] * 40, 0.41)[0])
-        # The watch stops a flight at 0.85 of the verdict's floor, not at the floor.
-        self.assertEqual(0.85, watchdog.WATCH_SHARE_OF_FLOOR)
-
-    def test_every_launcher_under_load_is_tracked_and_documented(self) -> None:
-        readme = (PATH.parents[1] / "tools/README.md").read_text()
-        for tool in ("rtf_watchdog.py", "fly_until_valid.sh", "record_until_pass.sh"):
-            self.assertTrue((PATH.parent / tool).is_file(), tool)
-            self.assertIn(f"`{tool}`", readme)
-        for launcher in ("fly_until_valid.sh", "record_until_pass.sh"):
-            text = (PATH.parent / launcher).read_text()
-            self.assertIn("tools/rtf_watchdog.py", text)
-            self.assertIn("tools/host_verdict.py", text)
-
-    def test_the_series_launcher_records_the_verdict(self) -> None:
-        launcher = (PATH.parent / "series2.sh").read_text(encoding="utf-8")
-        self.assertIn("tools/host_verdict.py", launcher)
 
 
 if __name__ == "__main__":

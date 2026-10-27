@@ -6,6 +6,7 @@ from __future__ import annotations
 import contextlib
 import importlib.util
 import io
+import json
 import sys
 import tempfile
 import unittest
@@ -23,26 +24,29 @@ SPEC.loader.exec_module(VALIDATOR)
 
 
 class ValidatorCliTest(unittest.TestCase):
-    def test_main_runs_with_current_required_arguments(self) -> None:
-        stderr = io.StringIO()
-        argv = [
-            str(VALIDATOR_PATH),
-            "--ros-log",
-            "ros.log",
-            "--px4-log",
-            "px4.log",
-        ]
-
-        with (
-            mock.patch.object(sys, "argv", argv),
-            mock.patch.object(VALIDATOR, "read_text", return_value=""),
-            contextlib.redirect_stdout(io.StringIO()),
-            contextlib.redirect_stderr(stderr),
-        ):
-            result = VALIDATOR.main()
-
-        self.assertEqual(result, 1)
-        self.assertIn("FAIL: production MPPI is ready", stderr.getvalue())
+    def test_missing_flight_evidence_cannot_produce_a_passing_json_result(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            ros_log, px4_log = root / "ros.log", root / "px4.log"
+            ros_log.write_text("", encoding="utf-8")
+            px4_log.write_text("", encoding="utf-8")
+            manifest = root / "manifest.json"
+            manifest.write_text("{}", encoding="utf-8")
+            report = root / "mission_check.json"
+            argv = [
+                str(VALIDATOR_PATH), "--ros-log", str(ros_log),
+                "--px4-log", str(px4_log), "--runtime-manifest", str(manifest),
+                "--mission-check", "--result-json", str(report),
+            ]
+            with (
+                mock.patch.object(sys, "argv", argv),
+                contextlib.redirect_stdout(io.StringIO()),
+                contextlib.redirect_stderr(io.StringIO()),
+            ):
+                result = VALIDATOR.main()
+            document = json.loads(report.read_text(encoding="utf-8"))
+        self.assertEqual(1, result)
+        self.assertIs(document["passed"], False)
 
     def test_a_measurement_outside_its_reference_is_a_note_and_never_a_failure(
         self,

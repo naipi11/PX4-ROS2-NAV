@@ -29,6 +29,7 @@ from headless_runtime_evidence import (
     validate_persistent_3d_acceptance_metrics,
     validate_runtime_manifest,
 )
+from runtime_manifest import atomic_write_json, file_record  # noqa: E402
 
 
 CRITICAL_PX4_PATTERN = re.compile(
@@ -371,6 +372,7 @@ def main() -> int:
         type=parse_route_volume_bounds,
     )
     parser.add_argument("--runtime-manifest", type=Path)
+    parser.add_argument("--result-json", type=Path)
     parser.add_argument(
         "--require-persistent-3d-acceptance", action="store_true"
     )
@@ -390,6 +392,8 @@ def main() -> int:
         parser.error(
             "--require-persistent-3d-acceptance requires --runtime-manifest"
         )
+    if args.result_json is not None and args.runtime_manifest is None:
+        parser.error("--result-json requires --runtime-manifest")
 
     ros_log = read_text(args.ros_log)
     px4_logs = [read_text(path) for path in args.px4_log]
@@ -616,6 +620,17 @@ def main() -> int:
         print(note.replace("FAIL:", "NOTE:", 1))
     for error in errors:
         print(error, file=sys.stderr)
+    if args.result_json is not None:
+        atomic_write_json(args.result_json, {
+            "schema": "drone_city_nav_headless_result_v1",
+            "runtime_manifest": file_record(args.runtime_manifest),
+            "mission_type": args.mission_type,
+            "mission_check": args.mission_check,
+            "allow_mission_failure": args.allow_mission_failure,
+            "passed": not errors,
+            "errors": errors,
+            "notes": [note.replace("FAIL:", "NOTE:", 1) for note in notes],
+        })
     return 0 if not errors else 1
 
 

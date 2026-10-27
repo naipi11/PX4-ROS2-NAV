@@ -5,13 +5,14 @@
 # flight host_verdict.py decides; a flight that does not count, or was stopped, is flown again under the next run
 # number, at most ATTEMPTS times. A flight that counts is the result, whatever its mission check says: a FAIL in it
 # is a finding, not a reason to fly again. TARGET, SMOKE_DURATION_S and REAL_TIME_FACTOR pass through to series2.sh.
-# One line a flight in log/tools/fly_until_valid.txt (rNNN VALID | VOID reason | WATCHDOG reason), then END; exits 0
-# on a flight that counts.
+# One line a flight in log/tools/fly_until_valid.txt, then END. Exits with the
+# series verdict; a valid failed flight stops here, never retried into a pass.
 set -u
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 lidar=(); watch=()
 if [ "${1:-}" = "--lidar" ]; then lidar=(--lidar); watch=(--lidar); shift; fi
 first=$1; attempts=$2
+mkdir -p log/tools || exit 3
 flag=log/tools/fly_until_valid.txt; rm -f "$flag"
 for number in $(seq "$first" $((first + attempts - 1))); do
   run="r$number"
@@ -24,20 +25,21 @@ for number in $(seq "$first" $((first + attempts - 1))); do
     [ -f "log/runs/$run/resources.csv" ] || continue
     if ! verdict=$(python3 tools/rtf_watchdog.py "$run" "${watch[@]}" --factor "${REAL_TIME_FACTOR:-1.0}"); then
       stopped="${verdict#WATCHDOG slow $run }"
-      # By the process table: a pattern search of command lines would match this script's own.
-      kill $(ps -eo pid,args | awk '/tools\/series2.sh/ && !/awk/ {print $1}') 2> /dev/null
-      sleep 2; ./scripts/stop_sim.sh > /dev/null 2>&1
+      kill -TERM "$flight" 2> /dev/null || true
       break
     fi
   done
-  wait "$flight" 2> /dev/null
+  series_status=0
+  wait "$flight" 2> /dev/null || series_status=$?
   if [ -n "$stopped" ]; then
     echo "$run WATCHDOG $stopped" >> "$flag"
-  elif verdict=$(python3 tools/host_verdict.py "$run" 2>&1); then
-    echo "$run VALID" >> "$flag"; echo END >> "$flag"; exit 0
+  elif [ "$series_status" -eq 2 ]; then
+    echo "$run VOID record=log/runs/$run/acceptance.json" >> "$flag"
   else
-    echo "$run VOID ${verdict#HOST VOID $run: }" >> "$flag"
+    echo "$run RESULT exit=$series_status record=log/runs/$run/acceptance.json" >> "$flag"
+    echo END >> "$flag"
+    exit "$series_status"
   fi
 done
 echo END >> "$flag"
-exit 1
+exit 2

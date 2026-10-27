@@ -146,6 +146,16 @@ its own (a return home, a light failure) also flies that scenario:
 `TARGET=sim-urban-light-lost-headless ./tools/series2.sh r1110`. The series
 table is written to `log/tools/journal/series_<commit>_<profile>.txt`.
 
+The launcher requires a clean checkout, an unchanged commit throughout the
+series and unused run IDs. It holds a repository-wide series lock and stops
+on the first failure, host-void verdict or setup/evidence error; it never
+converts `HOST valid` into a mission pass. A void flight may be repeated with
+a fresh ID; a valid failure is investigated and repaired before restarting
+the acceptance series. `log/runs/RUN/.keep` retains the complete run, including
+the live command output, `mission_check.json`, `acceptance.json` and cleanup
+output. See [retained acceptance results](docs/testing.md#retained-acceptance-results)
+for exit codes and the evidence contract.
+
 **What a flight must show** (specification R1 to R4;
 [`docs/testing.md`](docs/testing.md) has every line of the check):
 

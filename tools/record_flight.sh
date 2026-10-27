@@ -11,24 +11,44 @@
 set -u
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 scenario=$1; run=$2; directory=$3
+mkdir -p log/tools "$directory" || exit 3
 case $scenario in
   point-to-point) duration=900 ;;
   light-lost) duration=400 ;;
   # Set aside by the owner on 2026-10-08: neither is flown nor recorded without the owner's word, the goal-outside
   # flight until item 19's proof is flown (roadmap item 24). FLY_SET_ASIDE=1 is that word.
-  long-failures) [ "${FLY_SET_ASIDE:-0}" = 1 ] || { echo "$scenario is set aside (the owner, 2026-10-08)" >&2; exit 2; }; duration=1500 ;;
-  return-home) [ "${FLY_SET_ASIDE:-0}" = 1 ] || { echo "$scenario is set aside (the owner, 2026-10-08)" >&2; exit 2; }; duration=900 ;;
+  long-failures) [ "${FLY_SET_ASIDE:-0}" = 1 ] || { echo "$scenario is set aside (the owner, 2026-10-08)" >&2; exit 3; }; duration=1500 ;;
+  return-home) [ "${FLY_SET_ASIDE:-0}" = 1 ] || { echo "$scenario is set aside (the owner, 2026-10-08)" >&2; exit 3; }; duration=900 ;;
   light-failure | low-battery) duration=1800 ;;
-  *) echo "unknown scenario $scenario" >&2; exit 2 ;;
+  *) echo "unknown scenario $scenario" >&2; exit 3 ;;
 esac
 # The flight starts 45 s after the simulator: the Gazebo window loads the scene for some 20 s, drawing nothing, and
 # a flight started at once took off unseen (r1090, r1092).
 RECORD_VIDEO=1 STARTUP_SLEEP_S=45 REAL_TIME_FACTOR="${REAL_TIME_FACTOR:-0.6}" TARGET="sim-urban-${scenario}-headless" SMOKE_DURATION_S=$duration \
   ./tools/series2.sh "$run" > /dev/null 2>&1 &
 flight=$!
+recorder=""
+interrupt() {
+  trap - INT TERM
+  kill -TERM "$flight" 2>/dev/null || true
+  if [[ -n "$recorder" ]]; then
+    kill -TERM -- "-$recorder" 2>/dev/null || true
+    wait "$recorder" 2>/dev/null || true
+  fi
+  wait "$flight" 2>/dev/null || true
+  exit "$1"
+}
+trap 'interrupt 130' INT
+trap 'interrupt 143' TERM
 name="${scenario}_${run}"
-gnome-session-inhibit --inhibit idle --reason "recording flight $run" \
+record_status=0
+setsid gnome-session-inhibit --inhibit idle --reason "recording flight $run" \
   python3 scripts/record_flight_video.py "$run" "$flight" "$directory" "$name" \
-  > "log/tools/record_${run}.log" 2>&1
-wait "$flight"
+  > "log/tools/record_${run}.log" 2>&1 &
+recorder=$!
+wait "$recorder" || record_status=$?
+flight_status=0
+wait "$flight" || flight_status=$?
 cat "log/tools/record_${run}.log"
+if [[ "$flight_status" -ne 0 ]]; then exit "$flight_status"; fi
+exit "$record_status"

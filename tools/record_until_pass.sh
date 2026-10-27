@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # record_until_pass.sh SCENARIO FIRST_RUN ATTEMPTS DIRECTORY: records SCENARIO (tools/record_flight.sh) until one flight
 # passes its check with a recording that is one, at most ATTEMPTS times, runs numbered from FIRST_RUN (an integer).
-# A flight that stands still for twelve mission summaries in a row, a minute of simulation, is stopped and flown
-# again without waiting for its window to end: the long flight under failures does that below real time (the
-# register's P10). So is a flight the host's load has slowed under the verdict's floor (rtf_watchdog.py, every 20 s),
-# and one the host's verdict does not count after it (specification A4, A7). One line a flight in
-# log/tools/record_until_pass.txt (PASS, STALLED, WATCHDOG, VOID or FAILED), then END.
+# Only a host-void flight or a bad recording is retried. A valid mission failure,
+# missing evidence or an interrupted/stalled flight stops the sequence.
+# The watchdog still stops host-slowed flights (specification A4, A7).
+# One line per flight in log/tools/record_until_pass.txt, then END.
 set -u
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 scenario=$1; first=$2; attempts=$3; directory=$4
+mkdir -p log/tools "$directory" || exit 3
 flag=log/tools/record_until_pass.txt; rm -f "$flag"
 for number in $(seq "$first" $((first + attempts - 1))); do
   run="r$number"; log="log/runs/$run/ros_drone_nav.log"; stalled=""
@@ -27,23 +27,25 @@ for number in $(seq "$first" $((first + attempts - 1))); do
       stalled=STALLED
     fi
     if [ -n "$stalled" ]; then
-      # By the process table: a pattern search of command lines would match this script's own.
-      kill $(ps -eo pid,args | awk '/tools\/record_flight.sh|tools\/series2.sh|scripts\/record_flight_video.py/ && !/awk/ {print $1}') 2> /dev/null
-      sleep 2; ./scripts/stop_sim.sh > /dev/null 2>&1
-      rm -f "$directory/${scenario}_${run}"_*.mp4
+      # The owned wrapper forwards TERM to its series and recorder only.
+      kill -TERM "$flight" 2>/dev/null || true
       break
     fi
   done
-  wait "$flight" 2> /dev/null
-  if [ -n "$stalled" ]; then
+  flight_status=0
+  wait "$flight" 2>/dev/null || flight_status=$?
+  if [[ "$stalled" == WATCHDOG* ]]; then
     echo "$run $stalled" >> "$flag"
-  elif ! verdict=$(python3 tools/host_verdict.py "$run" 2>&1); then
-    echo "$run VOID ${verdict#HOST VOID $run: }" >> "$flag"
-  elif [ "$(grep -c "RECORDING ok" "log/tools/record_$run.log" 2> /dev/null)" -eq 2 ] &&
-    ! grep -q "^FAIL" "log/tools/run_$run.log" 2> /dev/null; then
-    echo "$run PASS" >> "$flag"; break
-  else
-    echo "$run FAILED" >> "$flag"
+    continue
+  fi
+  result_status=0
+  python3 tools/record_index.py "$scenario" "$run" "$directory" > /dev/null || result_status=$?
+  if [[ "$result_status" -eq 0 && "$flight_status" -ne 0 ]]; then result_status=3; fi
+  echo "$run RESULT exit=$result_status ${stalled:+$stalled }record=log/runs/$run/acceptance.json" >> "$flag"
+  if [[ "$result_status" -ne 2 ]]; then
+    echo END >> "$flag"
+    exit "$result_status"
   fi
 done
 echo END >> "$flag"
+exit 2

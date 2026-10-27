@@ -75,6 +75,44 @@ make format
 Do not run broad formatting over the entire repository unless intentionally
 normalizing the project.
 
+## Retained Acceptance Results
+
+Run `tools/series2.sh [--lidar] RUN [RUN...]` from a clean committed checkout.
+Run IDs must be unused; one series owns the repository's simulation until
+its quiet-host wait, flights, inspection and cleanup finish. Each flight is
+checked before the next starts. A source change, reused ID or second series
+is rejected, not treated as a flight result.
+
+The existing headless checker writes `log/runs/RUN/mission_check.json`.
+Its `passed`, `errors` and `notes` are the same verdict printed by the CLI;
+it binds the runtime manifest by SHA-256. The series then writes
+`acceptance.json`, binding the requested commit and GNSS-denied sensor
+profile, manifest, checker result and command log. It records command and
+cleanup exits and the existing A7 host verdict. This is not a second mission
+criterion: a diagnostic note remains a note, and the flight thresholds below
+are unchanged.
+
+| Series exit | Status | Action |
+|---|---|---|
+| 0 | `passed` | Every requested flight passed its checker and host verdict. |
+| 1 | `failed` | A host-valid flight or its command failed. Investigate; do not retry it into a pass. |
+| 2 | `void` | The host invalidated the flight. Retry with a fresh run ID on a quiet host. |
+| 3 | `error` | Setup, cleanup, source identity or evidence is invalid/missing. Fix the workflow before flying again. |
+| 130 / 143 | `interrupted` | INT / TERM stopped the owned flight; partial evidence is retained, not accepted. |
+
+The series exits at the first non-pass. `HOST valid` alone is never success.
+When both a mission failure and host void are observed, the A7 void verdict
+takes precedence; missing or inconsistent evidence remains an error, not a
+void flight.
+
+`log/runs/RUN/.keep` protects the full run from weekly pruning.
+`acceptance.log` retains the bytes also exposed at `log/tools/run_RUN.log`;
+`cleanup.log` records the post-flight stop. The journal in
+`log/tools/journal/series_<commit>_<profile>.txt` points to each structured
+result. INT/TERM stops only the owned series flight and records its partial
+result when a run has started; an interruption during the quiet-host wait
+does not invent a flight record.
+
 ## Headless Acceptance Gate
 
 **What fails a flight, and what does not (project owner, 2026-09-19).** The

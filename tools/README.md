@@ -24,20 +24,23 @@ A loose file cannot be kept: check logs (`run_rNNN.log`), gate logs and
 flags go after a week. A new recording or result that has to stay goes into
 a kept directory, or into a new directory with its own `.keep`.
 
-Runs are named `rNNN`; a flight's artifacts are in `log/runs/rNNN/` and its
-mission check's output in `log/tools/run_rNNN.log`.
+Run IDs are unique labels such as `rNNN` or `p2_20261027_s01`. The series
+keeps each flight under `log/runs/RUN/.keep`: `acceptance.log` is the same
+output exposed at `log/tools/run_RUN.log`, so pruning the loose link does not
+remove the retained evidence. `mission_check.json` is the existing checker's
+result; `acceptance.json` combines it with the host verdict and command exits.
 
 ## Launching
 
 | Tool | What it does | Use |
 |---|---|---|
 | `gates.sh` | The whole pre-commit gate in the dev container, detached: format, build, unit tests, script tests, quality. Verdict in `log/tools/gate_flag.txt` (`X=0` is green), output in `log/tools/gate_all.log`. | `./tools/gates.sh`, then poll the flag. Do not edit tracked files while it runs. |
-| `series2.sh` | Acceptance flights one at a time on the current commit. Prunes logs older than a week, waits until the host has been quiet for 60 s, stops any simulation before and after, appends the check's key lines to `log/tools/journal/series_<commit>_<profile>.txt`. | `./tools/series2.sh r950 r951` (cameras); `./tools/series2.sh --lidar r954` (`--lidar` first); another scenario with `TARGET=sim-urban-light-lost-headless SMOKE_DURATION_S=400 ./tools/series2.sh r939`. |
+| `series2.sh` | Acceptance flights one at a time on one clean commit. Rejects reused IDs and concurrent series; waits for the quiet host, stops the simulation before and after each flight, and stops at the first non-passing verdict. Keeps structured results and logs; appends the series journal. | `./tools/series2.sh r950 r951` (cameras); `./tools/series2.sh --lidar r954` (`--lidar` first); another scenario with `TARGET=sim-urban-light-lost-headless SMOKE_DURATION_S=400 ./tools/series2.sh r939`. |
 | `host_verdict.py` | Whether a flight counts, by the host it was flown on (specification A7): `HOST valid` or `HOST VOID` with the reason, from the real-time factor at the median (0.82 on the stereo set, 0.97 on the lidar, of the factor the run asked for), the resource sampler's largest gap (2 s) and the age of the estimator's poses on their way to the autopilot (300 ms at the 95th percentile). The series launcher appends it to the series table after every flight. | `python3 tools/host_verdict.py r981` |
 | `rtf_watchdog.py` | Whether a flight is being flown under a load that will void it, read while it flies: the median of the simulator's real-time factor over the last 30 sampled seconds (after the flight has got going) against the verdict's floor of the factor the run asked for. `WATCHDOG ok`, `slow` (exit 1) or `waiting`. | `python3 tools/rtf_watchdog.py r1098 --lidar --factor 1.0` |
-| `fly_until_valid.sh` | One flight that counts, on a host another task may load: a `series2.sh` flight watched every 20 s by the watchdog, stopped at once when slowed, judged by `host_verdict.py` after, and flown again under the next number when stopped or void, at most the stated number of times. A flight that counts is the result whatever its check says. `TARGET`, `SMOKE_DURATION_S` and `REAL_TIME_FACTOR` pass through. Lines in `log/tools/fly_until_valid.txt` (`VALID`, `VOID reason`, `WATCHDOG reason`), then `END`. | `./tools/fly_until_valid.sh --lidar 1130 4`; `TARGET=sim-urban-low-battery-headless SMOKE_DURATION_S=1800 ./tools/fly_until_valid.sh 1140 4` |
-| `mx.sh` | One flight of roadmap item 17's acceptance matrix by line number (1 cameras, 2 lidar, 3 long failures, 4 light lost, 5 severe failure, 7 low battery, 8 goal outside). Refuses to start while a flight runs or the run exists; marks its end in `log/tools/mx_flag.txt`. | `./tools/mx.sh 5 r944 &` |
-| `mxw.sh` | Waits up to 9.5 minutes for that flight; prints `DONE` or `RUNNING`. Never stops a flight. | `./tools/mxw.sh r944` |
+| `fly_until_valid.sh` | Watches one series flight every 20 s. Retries only a watchdog-stopped or host-void flight, under a fresh run number; a valid failed flight or evidence error stops immediately. Preserves the series exit code; exhaustion exits 2. `TARGET`, `SMOKE_DURATION_S` and `REAL_TIME_FACTOR` pass through. Records `RESULT exit=...`, `VOID` or `WATCHDOG`, then `END`, in `log/tools/fly_until_valid.txt`. | `./tools/fly_until_valid.sh --lidar 1130 4`; `TARGET=sim-urban-low-battery-headless SMOKE_DURATION_S=1800 ./tools/fly_until_valid.sh 1140 4` |
+| `mx.sh` | One flight of roadmap item 17's acceptance matrix by line number. Preserves the series exit code and records `DONE LINE RUN exit=CODE` in `log/tools/mx_flag.txt`; rejection records `REFUSED` with exit 3. | `./tools/mx.sh 5 r944 &` |
+| `mxw.sh` | Waits up to 9.5 minutes for the exact matrix run ID. Prints `DONE exit=CODE` or `REFUSED exit=CODE` and returns that code; `RUNNING` only means the observation window ended. Never stops a flight. | `./tools/mxw.sh r944` |
 
 Flights run strictly one at a time. A flight `host_verdict.py` calls void is
 flown again, and a crash in it is not a defect. On a host that another task
@@ -46,14 +49,19 @@ loads from time to time, every flight goes through `fly_until_valid.sh` or
 is stopped, and it is flown again when the host is quiet; the foreign
 processes are never touched (specification A4).
 
+Series exit codes are documented in
+[`docs/testing.md`](../docs/testing.md#retained-acceptance-results).
+`HOST valid` alone is not a pass. A valid mission failure stops the series
+and must be investigated, not retried into a green result.
+
 ## Recording
 
 | Tool | What it does | Use |
 |---|---|---|
 | `record_flight.sh` | One flight of a named scenario (`point-to-point`, `light-lost`, `light-failure`, `low-battery`; the stereo set only; `long-failures` and `return-home` are set aside by the owner since 2026-10-08 and refused without `FLY_SET_ASIDE=1`, the owner's word) flown as its headless flight with the Gazebo window and RViz open, at a real-time factor of 0.6 unless `REAL_TIME_FACTOR` says otherwise, and recorded: two split videos in the directory, the world on the left and RViz on the right, third-person and top-down, each the whole flight at the flight's own pace. A recording whose window stood still, whose half was a slideshow while the vehicle moved, that is off the flight's clock by more than a second, that shows a frame further than half a second from its moment or that is shorter than a minute is `BAD`. The desktop is kept from going idle meanwhile; the windows open below the others and minimize themselves once they draw (the owner, 2026-10-08), and keep drawing minimized. The recorder's output is `log/tools/record_RUN.log`. | `./tools/record_flight.sh light-lost r1020 log/videos/2026-10-04` |
-| `record_batch.sh` | Every scenario of roadmap item 17 on the stereo set round robin, all once, then all again, for the stated number of passes; a flight that failed or whose recording is not one is flown again at the end of its pass. Videos, `index.md` and `batch.log` in the directory, which it keeps from the pruning. | `./tools/record_batch.sh log/videos/2026-10-04 3 1020 &` |
-| `record_index.py` | The index row of one recorded flight (the batch calls it). | `python3 tools/record_index.py light-lost r1020 log/videos/2026-10-04` |
-| `record_until_pass.sh` | Records one scenario until a flight passes its check with a recording that is one, at most the stated number of times; a flight that stands still for a minute of simulation (the long flight under failures does that below real time, the register's P10), one the watchdog finds slowed by the host's load, or one the verdict does not count is stopped and flown again. One line a flight in `log/tools/record_until_pass.txt` (`PASS`, `STALLED`, `WATCHDOG`, `VOID`, `FAILED`), then `END`. | `./tools/record_until_pass.sh long-failures 1121 5 log/videos/2026-10-05 &` |
+| `record_batch.sh` | Records the four allowed scenarios round robin. Only host-void flights or bad recordings are retried once at the end of the pass. A valid mission failure, evidence error or interruption stops the batch with a nonzero exit. Keeps videos, `index.md` and `batch.log` in the directory. | `./tools/record_batch.sh log/videos/2026-10-04 3 1020 &` |
+| `record_index.py` | Indexes the retained `acceptance.json`, not an absence of `FAIL` text. Exit 0 (`OK`) requires a passing flight and two valid recordings; 2 (`RETRY`) means host void or a bad recording. Other verdicts print `STOP` and preserve the nonzero acceptance code. Missing evidence exits 3. | `python3 tools/record_index.py light-lost r1020 log/videos/2026-10-04` |
+| `record_until_pass.sh` | Watches and records one scenario. Only watchdog/host-void flights or bad recordings are retried; valid failures, missing evidence and non-watchdog interruptions stop. The wrapper signals only its owned series and recorder, retaining partial evidence. Records each result in `log/tools/record_until_pass.txt`, then `END`. | `./tools/record_until_pass.sh point-to-point 1121 5 log/videos/2026-10-05 &` |
 | `video_check.py` | A finished split video with no run beside it: its length, the different frames a second of each half in windows of 5 s (a slideshow shows about one, a smooth recording 19 to 24), and the sampled frames in which the world half holds the green of Gazebo's light gizmo. `VIDEO ok` or `VIDEO BAD` with the reasons. | `python3 tools/video_check.py log/videos/2026-10-05/*_follow.mp4` |
 | `window_rig.sh` | The Gazebo window of a recording over a small test world, with no flight, inside the container: `rate SECONDS [NAME=value ...]` prints the window's redraws a second (24 is sound, 1 is a window waiting for a blank screen; the assignments try a remedy in its environment), `frame [SDF]` counts the bright green pixels of one frame (the gizmo of a light the window is told to visualize; the SDF goes inside the light). Both causes of the first batch's defects were found with it. | `bash /workspace/tools/window_rig.sh rate 20` |
 

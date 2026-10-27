@@ -11,7 +11,9 @@ c=""; for _ in $(seq 1 900); do sleep 1; c=$(docker ps --format '{{.ID}}' | sort
 mkdir -p "log/tools/vio/$run"
 docker exec "$c" bash -lc "source /opt/ros/jazzy/setup.bash; source /workspace/install/setup.bash; sleep 25; exec python3 /workspace/tools/vio/record_vio.py /workspace/log/tools/vio/$run $*" > "log/tools/vio/${run}_rec.log" 2>&1 &
 docker exec "$c" bash -lc "sleep 25; exec /workspace/log/tools/vio/record_frames /workspace/log/tools/vio/$run" > "log/tools/vio/${run}_frames.log" 2>&1 &
-wait "$series"
+flight_status=0
+wait "$series" || flight_status=$?
 ./scripts/stop_sim.sh > /dev/null 2>&1
 python3 tools/vio/trim_record.py "log/tools/vio/$run" >> "log/tools/vio/${run}_rec.log" 2>&1
-echo "RECORDED $run" >> "log/tools/vio/${run}_rec.log"
+echo "RECORDED $run flight_exit=$flight_status" >> "log/tools/vio/${run}_rec.log"
+exit "$flight_status"

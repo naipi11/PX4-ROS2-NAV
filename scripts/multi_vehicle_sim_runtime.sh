@@ -152,6 +152,7 @@ check_headless_run() {
     --lidar-profile "${lidar_profile}"
     --enable-lidar-debug "${enable_lidar_debug}"
     --runtime-manifest "${runtime_manifest_path}"
+    --result-json "${runtime_artifact_dir}/mission_check.json"
   )
   if bool_is_true "${multi_vehicle_mission}"; then
     validation_args+=(--expected-vehicles "${#multi_vehicle_ids[@]}")

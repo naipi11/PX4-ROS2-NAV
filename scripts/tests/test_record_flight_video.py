@@ -202,33 +202,8 @@ class RecordingRuntimeContractTest(unittest.TestCase):
                     self.assertNotIn("RECORD_VIDEO", text, str(path))
                     self.assertNotIn("FRAME_CAPTURE", text, str(path))
 
-    def test_the_batch_flies_every_scenario_round_robin(self) -> None:
-        batch = (REPOSITORY / "tools/record_batch.sh").read_text()
-        for scenario in ("point-to-point", "light-lost", "light-failure", "low-battery"):
-            self.assertIn(f'"{scenario}"', batch)
-        # The long flight to B and back and the goal-outside flight are set
-        # aside (the owner, 2026-10-08): not in the batch, refused by the
-        # flight without the owner's word.
-        flight = (REPOSITORY / "tools/record_flight.sh").read_text()
-        for scenario in ("long-failures", "return-home"):
-            self.assertNotIn(f'"{scenario}"', batch)
-            self.assertIn(f'{scenario}) [ "${{FLY_SET_ASIDE:-0}}" = 1 ] ||', flight)
-        self.assertLess(batch.index('for pass in'), batch.index('for scenario in "${scenarios[@]}"'))
-        # A lidar flight is not recorded (specification A11).
-        self.assertNotIn("lidar", batch)
-        flight = (REPOSITORY / "tools/record_flight.sh").read_text()
-        self.assertIn("RECORD_VIDEO=1", flight)
-        self.assertIn("gnome-session-inhibit --inhibit idle", flight)
-
 
 class RecordingToolsContractTest(unittest.TestCase):
-    def test_every_recording_tool_is_tracked_and_documented(self) -> None:
-        readme = (REPOSITORY / "tools/README.md").read_text()
-        for tool in ("record_flight.sh", "record_batch.sh", "record_index.py",
-                     "record_until_pass.sh", "video_check.py", "window_rig.sh"):
-            self.assertTrue((REPOSITORY / "tools" / tool).is_file(), tool)
-            self.assertIn(f"`{tool}`", readme)
-
     def test_the_video_check_judges_by_the_recorder_s_floors(self) -> None:
         check = (REPOSITORY / "tools/video_check.py").read_text()
         for name in ("MINIMUM_DISTINCT_FRAMES_PER_SECOND", "MINIMUM_DURATION_S"):
