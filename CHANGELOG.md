@@ -26,6 +26,21 @@ release names the asset tags it was validated with.
   acceptance flight. Full evidence and analysis procedures are under
   `log/tools/diagnostics/navigation-speed-20261029/`.
 
+### Acceptance evidence
+
+- Stop and join raw-snapshot capture before the headless check binds the runtime
+  manifest. A capture failure stops validation; normal ROS context shutdown
+  exits cleanly. The manifest hash gate is unchanged.
+- The `9390e86` series stopped after five passing VIO flights when
+  `navfix_20261029_l01` hit this evidence race: navigation completed at 2.866 m/s,
+  but the checker bound revision 1071 before capture advanced the manifest to
+  revision 1366. The LIO flight is not accepted and the full series restarts
+  after this repair. Both hashes were reconstructed from retained snapshots.
+- Preserve the failing-before/passing-after process-lifecycle regression and
+  a real ROS capture smoke (clean exit, exact occupied bits, no manifest change
+  after shutdown) in
+  `log/tools/diagnostics/navigation-speed-20261029/manifest-race/`.
+
 ## v0.5.0 (2026-10-10)
 
 Flight in degraded visual conditions: the location has no light of its own,

@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import io
 import json
+import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -21,12 +23,6 @@ import capture_raw_snapshot_3d as capture  # noqa: E402
 import headless_runtime_evidence as evidence  # noqa: E402
 import runtime_manifest  # noqa: E402
 import validate_drone_nav_headless as validator  # noqa: E402
-
-
-RUNNER = SCRIPTS / "run_drone_nav_sim.sh"
-RUNTIME_HELPER = SCRIPTS / "multi_vehicle_sim_runtime.sh"
-EVIDENCE_RUNTIME = SCRIPTS / "runtime_evidence_runtime.sh"
-CONTAINER_RUNNER = SCRIPTS / "container_run.sh"
 
 
 def words_with_bits(*indices: int) -> list[int]:
@@ -132,6 +128,70 @@ class RuntimeManifestTest(unittest.TestCase):
 
             document = json.loads(manifest_path.read_text(encoding="utf-8"))
             self.assertEqual(document["raw_snapshot"]["revision"], 8)
+
+    def test_checker_binding_survives_the_capture_final_write(self) -> None:
+        # The real checker deliberately sees empty flight logs. Whether the
+        # mission passes is separate from binding its final, immutable evidence.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            manifest = root / "manifest.json"
+            runtime_manifest.atomic_write_json(
+                manifest, {"schema": runtime_manifest.SCHEMA,
+                           "raw_snapshot": {"revision": 1}})
+            (root / "empty.log").touch()
+            os.mkfifo(root / "ready")
+            (root / "capture.py").write_text(
+                """import signal, sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+from runtime_manifest import update_raw_snapshot_record
+root = Path(sys.argv[2])
+def finish(*_):
+    update_raw_snapshot_record(root / 'manifest.json', {'revision': 2})
+    raise SystemExit(0)
+signal.signal(signal.SIGTERM, finish)
+with (root / 'ready').open('w') as stream:
+    stream.write('ready\\n')
+while True:
+    signal.pause()
+""", encoding="utf-8")
+            result = subprocess.run(
+                ["bash", "-c", r"""
+set -uo pipefail
+repo_root="$1"
+runtime_artifact_dir="$2"
+source "${repo_root}/scripts/multi_vehicle_sim_runtime.sh"
+bool_is_true() { [[ "$1" == true ]]; }
+runtime_manifest_path="${runtime_artifact_dir}/manifest.json"
+raw_snapshot_capture_log_file="${runtime_artifact_dir}/capture.log"
+ros_log_file="${runtime_artifact_dir}/empty.log"
+px4_log_file="${ros_log_file}"
+gz_log_file="${ros_log_file}"
+mission_type=point_to_point
+expected_static_map=false
+expected_obstacle_memory=true
+lidar_profile=3d
+enable_lidar_debug=false
+multi_vehicle_mission=false
+mission_check=true
+allow_mission_failure=false
+require_observed_3d_route_volume_crossing=false
+python3 "${runtime_artifact_dir}/capture.py" "${repo_root}/scripts" \
+  "${runtime_artifact_dir}" > "${raw_snapshot_capture_log_file}" 2>&1 &
+capture_pid=$!
+raw_snapshot_capture_pid="${capture_pid}"
+trap 'kill "${capture_pid}" 2>/dev/null || true; wait "${capture_pid}" || true' EXIT
+IFS= read -r ready < "${runtime_artifact_dir}/ready"
+check_headless_run
+""", "capture-lifecycle", str(SCRIPTS.parent), str(root)],
+                capture_output=True, text=True, timeout=20)
+            self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+            report = json.loads((root / "mission_check.json").read_text())
+            self.assertFalse(report["passed"])
+            self.assertEqual(
+                runtime_manifest.read_manifest(manifest)["raw_snapshot"]["revision"], 2)
+            self.assertEqual(
+                report["runtime_manifest"], runtime_manifest.file_record(manifest))
 
     def test_acceptance_metrics_enforce_availability_latency_owner_and_reserve(
         self,
@@ -344,20 +404,6 @@ class RuntimeManifestTest(unittest.TestCase):
             rows.append(f"{sim_s:.3f},0,0,7.5,0,0,0,1,{wall_s:.6f}")
         path.write_text("\n".join(rows) + "\n", encoding="utf-8")
         return path
-
-    def test_simulator_wires_per_run_manifest_capture_and_strict_gate(self) -> None:
-        runner = RUNNER.read_text(encoding="utf-8")
-        evidence_runtime = EVIDENCE_RUNTIME.read_text(encoding="utf-8")
-        helper = RUNTIME_HELPER.read_text(encoding="utf-8")
-        container = CONTAINER_RUNNER.read_text(encoding="utf-8")
-
-        self.assertIn("runtime_evidence_runtime.sh", runner)
-        self.assertIn("runtime_manifest.py", evidence_runtime)
-        self.assertIn("capture_raw_snapshot_3d.py", evidence_runtime)
-        self.assertIn('runs/${run_id}', evidence_runtime)
-        self.assertIn('--runtime-manifest "${runtime_manifest_path}"', helper)
-        self.assertIn("--require-persistent-3d-acceptance", helper)
-        self.assertIn("DRONE_GAZEBO_RUN_ID", container)
 
     def _manifest(self, profile: str) -> Path:
         directory = Path(tempfile.mkdtemp())

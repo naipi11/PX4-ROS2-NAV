@@ -136,6 +136,16 @@ print_log_tail() {
 }
 
 check_headless_run() {
+  # Freeze the manifest before the checker binds its hash. The raw-snapshot
+  # subscriber can still receive a queued revision after the ROS launch exits.
+  if [[ -n "${raw_snapshot_capture_pid:-}" ]]; then
+    kill "${raw_snapshot_capture_pid}" 2>/dev/null || true
+    if ! wait "${raw_snapshot_capture_pid}"; then
+      echo "Raw snapshot capture failed: ${raw_snapshot_capture_log_file}" >&2
+      return 1
+    fi
+    raw_snapshot_capture_pid=""
+  fi
   # The true pose is saved every two seconds and once more when its capture
   # is stopped; the check reads it up to the flight's last acknowledgement, so
   # the capture ends first (r865, r900: a pose 1.1 and 1.2 s short of it).

@@ -141,6 +141,13 @@ force (`effective_overrides`): the configuration file's hash alone does not
 identify a run, because the launch takes overrides that change speed limits,
 accelerations, the map mode and the duration without touching the file.
 
+Raw-snapshot capture can update the manifest while the ROS launch is shutting
+down. Before headless validation, the runner stops and joins that subscriber;
+an unsuccessful capture exit prevents validation. The checker therefore binds
+the final manifest in `mission_check.json`, and `tools/acceptance_result.py`
+requires that exact SHA256 after cleanup. A mismatch is an evidence error,
+never a flight pass and never repaired by rewriting a completed check's hash.
+
 `RAW_SNAPSHOT_BOUNDS_M` places the raw Occupancy3D capture volume
 independently of `OBSERVED_3D_ROUTE_VOLUME_BOUNDS_M`. The latter is the
 acceptance volume and sits near the start, because that is the geometry the

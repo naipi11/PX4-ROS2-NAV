@@ -214,9 +214,13 @@ def main() -> int:
     node = SnapshotCaptureNode()
     try:
         rclpy.spin(node)
+    except (KeyboardInterrupt, rclpy.executors.ExternalShutdownException):
+        # The runner stops this subscriber before validating the manifest.
+        pass
     finally:
         node.destroy_node()
-        rclpy.shutdown()
+        if rclpy.ok():
+            rclpy.shutdown()
     return 0
 
 

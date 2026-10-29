@@ -109,6 +109,7 @@ start_runtime_evidence_capture() {
     --manifest "${runtime_manifest_path}" \
     --bounds="${raw_snapshot_bounds_m}" \
     > "${raw_snapshot_capture_log_file}" 2>&1 &
+  raw_snapshot_capture_pid=$!
   # The controller-dynamics records the mission check reads: the setpoints
   # against the local position, and the true pose. Every headless flight
   # records them; a GUI flight on request.
