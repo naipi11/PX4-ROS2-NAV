@@ -4,6 +4,28 @@ Code releases are tagged `vMAJOR.MINOR.PATCH` on `main`. Environment asset
 bundles are released separately under `environment-assets-*` tags; each code
 release names the asset tags it was validated with.
 
+## Unreleased
+
+### Navigation clearance
+
+- Measure the contact-departure/approach law's body margin from conservative
+  continuous sweeps against raw occupied voxel boxes, using the same immutable
+  world snapshot as the envelope ESDF. Voxel-phase changes in an ESDF lower
+  bound no longer masquerade as physical approach. K18, K27, collision
+  validation, speed settings, and acceptance thresholds are unchanged.
+- Retain a failing-before/passing-after producer-to-policy regression: a point
+  moving parallel to a wall at constant 0.125 m clearance was limited to
+  0.0836 m/s, while a genuine approach incorrectly retained the 1 m/s departure
+  floor. Cover the physical body/envelope distinction, vertical error toward
+  floors and ceilings, and contact between sampled states.
+- Record body margins alongside distance and envelope clearance in MPPI JSONL
+  constrained samples. See [diagnostics](docs/diagnostics.md).
+- Runtime smoke `navfix_20261029_diag01`: complete, collision-free LIO mission,
+  2.893 m/s, true goal error 0.51 m, real-time factor median 1.00. The checker
+  correctly rejected its uncommitted development source; it is not an
+  acceptance flight. Full evidence and analysis procedures are under
+  `log/tools/diagnostics/navigation-speed-20261029/`.
+
 ## v0.5.0 (2026-10-10)
 
 Flight in degraded visual conditions: the location has no light of its own,

@@ -281,8 +281,7 @@ PlanningCycleCoordinator3D::measureResidentExecutionClearance(
       std::min(static_cast<std::size_t>(elapsed_ns / control_interval_ns),
                horizon->states.size() - 2U);
   const ExecutedHorizonClearance3D clearance = measureExecutedHorizonClearance3D(
-      *horizon, first_remaining_state_index, request.world->grid,
-      *request.world->distances_m, config_.physical_footprint,
+      *horizon, first_remaining_state_index, *request.world, config_.physical_footprint,
       config_.executed_horizon_constraint_clearance_m);
   return clearance.available ? std::optional<ExecutedHorizonClearance3D>{clearance}
                              : std::nullopt;
@@ -458,8 +457,7 @@ PlanningCycleCoordinator3D::prepare(const PlanningCycleRequest3D& request) {
               request.world->distances_m != nullptr
           ? std::optional<ExecutedHorizonClearance3D>{measureRouteClearance3D(
                 route, output.route.projection.station_m,
-                config_.route_execution.latest_sensor_route_lookahead_m,
-                request.world->grid, *request.world->distances_m,
+                config_.route_execution.latest_sensor_route_lookahead_m, *request.world,
                 config_.physical_footprint,
                 config_.executed_horizon_constraint_clearance_m)}
           : std::nullopt;

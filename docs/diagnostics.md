@@ -58,12 +58,18 @@ at `diagnostics_file_rate_hz`, well below the tick rate, because the record is
 large. It additionally itemises the decision:
 
 - `executed_horizon_*`: the clearance the speed policy answered to — the
-  minimum over the motion under execution, the first constrained sample's
-  clearance and distance, `executed_horizon_distance_to_unobserved_m`, the
-  path length to the first sample whose body envelope reaches unobserved
-  space (`inf` when the whole motion is observed), and
-  `executed_horizon_constrained_samples`, every constrained sample as
-  `[distance_m, clearance_m]` in path order;
+  minimum envelope clearance over the motion under execution, the first
+  constrained sample's envelope clearance and distance, and
+  `executed_horizon_distance_to_unobserved_m`, the path length to the first
+  sample whose envelope reaches unobserved space (`null` when none does).
+  `executed_horizon_constrained_samples` contains
+  `[distance_m, envelope_clearance_m, body_clearance_m]` in path order.
+  The body margin is measured against raw occupied voxel boxes from the same
+  world snapshot, conservatively enclosing the continuous sweep and the
+  whole-cell-rounded vertical error allowance of specification K27. It is
+  capped at the constraint threshold (`null` if raw evidence is absent).
+  This third value is needed to distinguish K18's contact departure from an
+  approach; envelope clearance alone cannot explain a sub-floor reference;
 - `selected_costs` and `route_directed_candidate_costs`: the weighted cost
   terms of the sequence the tick selected and of the route-directed candidate
   (`null` when none was injected), reported by the same kernel that ranked the

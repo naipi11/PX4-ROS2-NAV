@@ -1,5 +1,8 @@
 #include "drone_city_nav/executed_horizon_clearance_3d.hpp"
 
+#include "drone_city_nav/raw_occupancy_clearance_3d.hpp"
+#include "drone_city_nav/world_snapshot_3d.hpp"
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -26,65 +29,95 @@ namespace {
 // floor by the estimate put the feet on it (r1184).
 constexpr double kEstimateVerticalErrorM{0.5};
 
-// The physical body alone, for the clearance a constrained sample's body keeps.
-[[nodiscard]] SweptFootprintConfig
-bodyFootprint(const SweptFootprintConfig& footprint) {
-  SweptFootprintConfig body = footprint;
-  body.radius_m = footprint.body_radius_m;
-  body.lower_extent_m = footprint.body_lower_extent_m;
-  body.upper_extent_m = footprint.body_upper_extent_m;
-  return body;
-}
-
-// The body's clearance where the estimate puts it, and the error lower and
-// higher: the least of the three. The query is conservative over the whole
-// 3D offset of every sample, so a taller body would have lost the error
-// sideways too; a shifted centre loses it only where the error lies. The
-// shift is whole cells of the evidence grid (two of the 0.25 m grid), so
-// the samples keep their place in the cells and the query answers as it
-// does unshifted.
-[[nodiscard]] double bodyClearanceM(const EsdfGrid3D& grid,
-                                    const std::span<const float> esdf_m,
-                                    const Point3& first, const Point3& second,
-                                    const SweptFootprintConfig& body) {
-  const double resolution_m = static_cast<double>(grid.resolution_m);
+// Compare geometric margins, not ESDF lower bounds: the latter change with the
+// query's position inside a voxel even during motion parallel to a flat wall.
+// Enclose each sweep interval by its centre-line box plus the physical cylinder.
+// This contains the entire continuous sweep and the whole-cell vertical error
+// interval; its raw-box inflation margin remains a conservative speed input.
+[[nodiscard]] double bodyClearanceM(const WorldSnapshot3D& world, const Point3& first,
+                                    const Point3& second,
+                                    const SweptFootprintConfig& footprint,
+                                    const double cap_m) {
+  const double resolution_m = static_cast<double>(world.grid.resolution_m);
   const double error_m =
       resolution_m > 0.0
           ? std::ceil(kEstimateVerticalErrorM / resolution_m - 1.0e-9) * resolution_m
           : kEstimateVerticalErrorM;
-  double clearance_m = std::numeric_limits<double>::infinity();
-  for (const double shift_m : {0.0, -error_m, error_m}) {
-    const DerivedFootprintClearance3D clearance = querySweptFootprintClearance3D(
-        grid, esdf_m, Point3{first.x, first.y, first.z + shift_m},
-        Point3{second.x, second.y, second.z + shift_m}, body);
-    if (clearance.evidence.known_clearance_observed) {
-      clearance_m = std::min(clearance_m, clearance.evidence.minimum_known_clearance_m);
+  const double radius_m = footprint.body_radius_m;
+  const double lower_extent_m = footprint.body_lower_extent_m + error_m;
+  const double upper_extent_m = footprint.body_upper_extent_m + error_m;
+  const auto interval_count = std::max(
+      std::size_t{1U},
+      static_cast<std::size_t>(std::ceil(segmentLength(first, second) /
+                                         std::max(footprint.sweep_step_m, 1.0e-6))));
+  const auto measure = [&](const auto& occupancy) {
+    double margin_m = cap_m;
+    Point3 previous = first;
+    for (std::size_t index = 1U; index <= interval_count && margin_m > 0.0; ++index) {
+      const double ratio =
+          static_cast<double>(index) / static_cast<double>(interval_count);
+      const Point3 next{std::lerp(first.x, second.x, ratio),
+                        std::lerp(first.y, second.y, ratio),
+                        std::lerp(first.z, second.z, ratio)};
+      const Point3 minimum{std::min(previous.x, next.x), std::min(previous.y, next.y),
+                           std::min(previous.z, next.z)};
+      const Point3 maximum{std::max(previous.x, next.x), std::max(previous.y, next.y),
+                           std::max(previous.z, next.z)};
+      const Point3 center{0.5 * (minimum.x + maximum.x), 0.5 * (minimum.y + maximum.y),
+                          0.5 * (minimum.z + maximum.z)};
+      const double reach_m =
+          margin_m + std::max({0.5 * (maximum.x - minimum.x) + radius_m,
+                               0.5 * (maximum.y - minimum.y) + radius_m,
+                               0.5 * (maximum.z - minimum.z) +
+                                   std::max(lower_extent_m, upper_extent_m)});
+      forEachRawOccupiedVoxelNear3D(
+          occupancy, center, reach_m, nullptr,
+          [&](const Point3& box_minimum, const Point3& box_maximum) {
+            const double dx =
+                std::max({box_minimum.x - maximum.x, minimum.x - box_maximum.x, 0.0});
+            const double dy =
+                std::max({box_minimum.y - maximum.y, minimum.y - box_maximum.y, 0.0});
+            const double horizontal_gap_m = std::hypot(dx, dy) - radius_m;
+            const double vertical_gap_m =
+                std::max(box_minimum.z - maximum.z - upper_extent_m,
+                         minimum.z - lower_extent_m - box_maximum.z);
+            margin_m =
+                std::min(margin_m, std::max({horizontal_gap_m, vertical_gap_m, 0.0}));
+          });
+      previous = next;
     }
+    return margin_m;
+  };
+  if (world.observed_occupancy != nullptr) {
+    return measure(*world.observed_occupancy);
   }
-  return clearance_m;
+  if (world.static_occupancy != nullptr) {
+    return measure(*world.static_occupancy);
+  }
+  return std::numeric_limits<double>::infinity();
 }
 
 } // namespace
 
 ExecutedHorizonClearance3D measureExecutedHorizonClearance3D(
     const FiniteMotionHorizon3D& horizon, const std::size_t first_remaining_state_index,
-    const EsdfGrid3D& grid, const std::span<const float> esdf_m,
-    const SweptFootprintConfig& footprint, const double constraint_clearance_m) {
+    const WorldSnapshot3D& world, const SweptFootprintConfig& footprint,
+    const double constraint_clearance_m) {
   ExecutedHorizonClearance3D result;
   if (horizon.states.size() < 2U ||
-      first_remaining_state_index + 1U >= horizon.states.size() || esdf_m.empty() ||
+      first_remaining_state_index + 1U >= horizon.states.size() ||
+      world.distances_m == nullptr || world.distances_m->empty() ||
       !(constraint_clearance_m > 0.0)) {
     return result;
   }
   result.available = true;
-  const SweptFootprintConfig body = bodyFootprint(footprint);
   double travelled_m{0.0};
   for (std::size_t index = first_remaining_state_index;
        index + 1U < horizon.states.size(); ++index) {
     const Point3 first = position(horizon.states[index]);
     const Point3 second = position(horizon.states[index + 1U]);
-    const DerivedFootprintClearance3D clearance =
-        querySweptFootprintClearance3D(grid, esdf_m, first, second, footprint);
+    const DerivedFootprintClearance3D clearance = querySweptFootprintClearance3D(
+        world.grid, *world.distances_m, first, second, footprint);
     if (clearance.evidence.unknown_exposure && !result.unobserved_distance_m) {
       result.unobserved_distance_m = travelled_m;
     }
@@ -95,7 +128,8 @@ ExecutedHorizonClearance3D measureExecutedHorizonClearance3D(
         result.constrained_samples.push_back(ConstrainedHorizonSample3D{
             .distance_m = travelled_m,
             .clearance_m = clearance_m,
-            .body_clearance_m = bodyClearanceM(grid, esdf_m, first, second, body)});
+            .body_clearance_m = bodyClearanceM(world, first, second, footprint,
+                                               constraint_clearance_m)});
       }
     }
     travelled_m += segmentLength(first, second);
@@ -103,20 +137,18 @@ ExecutedHorizonClearance3D measureExecutedHorizonClearance3D(
   return result;
 }
 
-ExecutedHorizonClearance3D
-measureRouteClearance3D(const std::span<const RouteSample3D> route,
-                        const double from_station_m, const double lookahead_m,
-                        const EsdfGrid3D& grid, const std::span<const float> esdf_m,
-                        const SweptFootprintConfig& footprint,
-                        const double constraint_clearance_m) {
+ExecutedHorizonClearance3D measureRouteClearance3D(
+    const std::span<const RouteSample3D> route, const double from_station_m,
+    const double lookahead_m, const WorldSnapshot3D& world,
+    const SweptFootprintConfig& footprint, const double constraint_clearance_m) {
   ExecutedHorizonClearance3D result;
   if (route.size() < 2U || !std::isfinite(from_station_m) ||
-      !std::isfinite(lookahead_m) || !(lookahead_m > 0.0) || esdf_m.empty() ||
+      !std::isfinite(lookahead_m) || !(lookahead_m > 0.0) ||
+      world.distances_m == nullptr || world.distances_m->empty() ||
       !(constraint_clearance_m > 0.0)) {
     return result;
   }
   result.available = true;
-  const SweptFootprintConfig body = bodyFootprint(footprint);
   const double end_station_m = from_station_m + lookahead_m;
   Point3 previous = sampleRoute3DAtStation(route, from_station_m).position;
   double previous_station_m = from_station_m;
@@ -125,7 +157,7 @@ measureRouteClearance3D(const std::span<const RouteSample3D> route,
       continue;
     }
     const DerivedFootprintClearance3D clearance = querySweptFootprintClearance3D(
-        grid, esdf_m, previous, sample.position, footprint);
+        world.grid, *world.distances_m, previous, sample.position, footprint);
     if (clearance.evidence.known_clearance_observed) {
       const double clearance_m = clearance.evidence.minimum_known_clearance_m;
       result.minimum_clearance_m = std::min(result.minimum_clearance_m, clearance_m);
@@ -133,8 +165,8 @@ measureRouteClearance3D(const std::span<const RouteSample3D> route,
         result.constrained_samples.push_back(ConstrainedHorizonSample3D{
             .distance_m = std::max(0.0, previous_station_m - from_station_m),
             .clearance_m = clearance_m,
-            .body_clearance_m =
-                bodyClearanceM(grid, esdf_m, previous, sample.position, body)});
+            .body_clearance_m = bodyClearanceM(world, previous, sample.position,
+                                               footprint, constraint_clearance_m)});
       }
     }
     if (sample.station_m >= end_station_m) {

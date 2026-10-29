@@ -121,18 +121,25 @@ Mode policy:
 - route lookahead and curvature preview;
 - sensor-braking and goal limits.
 
-The reference speed is also capped by the body clearance of the horizon the
-vehicle is executing, with the tracking-error tube law the route
-certification applies (`tracking_error_tube_response_time_s`,
-`tracking_error_tube_minimum_progress_speed_mps`): the tracking error the
-controller can accumulate within its response time must fit inside the
-clearance to known occupied evidence (unknown space does not count), whatever
-the route promised when it was certified. The minimum progress speed floors
-that limit so a tight spot stays leavable; the body validation remains the
-only hard authority. Where that horizon enters space the lidar has not
-observed, the sensor-braking contract below is read with the observed range
-along the motion in place of `guaranteed_lidar_detection_range_m`, floored by
-the same minimum progress speed.
+The reference speed is also capped by the clearance of the horizon the vehicle
+is executing and of the route ahead, with the tracking-error tube law
+(`tracking_error_tube_response_time_s`,
+`tracking_error_tube_minimum_progress_speed_mps`). The ESDF envelope clearance
+sets a tube ceiling with the configured progress floor. The physical body's
+own margin bounds that ceiling, including below the configured floor: K18's
+1 m/s contact-departure floor applies only where the body keeps at least its
+current clearance, never to an approach to a tighter point.
+
+Body margins come from raw occupied voxel boxes in the same immutable world
+snapshot as the ESDF. Each sweep interval is conservatively enclosed, including
+the whole-cell-rounded +/-0.5 m vertical allowance of K27. Comparing those
+geometric margins avoids mistaking a voxel-phase change in an ESDF lower bound
+for motion toward a wall. These are speed inputs, not a second collision
+authority; raw body validation remains unchanged. Unknown space contributes
+no occupied-box constraint. Where the horizon enters unobserved space, the
+sensor-braking contract below uses the observed range along the motion in
+place of `guaranteed_lidar_detection_range_m`, floored by the same configured
+minimum progress speed.
 
 `guaranteed_lidar_detection_range_m` and
 `sensor_braking_physical_margin_m` define the physical sensor side of the

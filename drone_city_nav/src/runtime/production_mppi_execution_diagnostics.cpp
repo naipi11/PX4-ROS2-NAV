@@ -162,7 +162,7 @@ std::string executedHorizonClearanceJsonFields(
     bool first = true;
     for (const ConstrainedHorizonSample3D& sample : clearance->constrained_samples) {
       fields << (first ? "" : ",") << '[' << sample.distance_m << ','
-             << sample.clearance_m << ']';
+             << sample.clearance_m << ',' << sample.body_clearance_m << ']';
       first = false;
     }
   }

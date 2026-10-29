@@ -1,10 +1,14 @@
 #include "drone_city_nav/executed_horizon_clearance_3d.hpp"
+#include "drone_city_nav/mppi_speed_policy.hpp"
+#include "drone_city_nav/world_snapshot_3d.hpp"
 
 #include <gtest/gtest.h>
 
 #include <cmath>
 #include <cstddef>
+#include <memory>
 #include <optional>
+#include <utility>
 #include <vector>
 
 namespace drone_city_nav {
@@ -40,6 +44,40 @@ constexpr int kKnownLength{10};
   return field;
 }
 
+[[nodiscard]] WorldSnapshot3D clearanceWorld(const EsdfGrid3D& lattice,
+                                             std::vector<float> distances) {
+  auto occupancy = std::make_shared<ObservedOccupancyGrid3D>(GridBounds3D{
+      .origin_x = lattice.origin_x_m,
+      .origin_y = lattice.origin_y_m,
+      .origin_z = lattice.origin_z_m,
+      .resolution_m = lattice.resolution_m,
+      .width_cells = lattice.width,
+      .height_cells = lattice.height,
+      .depth_cells = lattice.depth,
+  });
+  for (int z = 0; z < lattice.depth; ++z) {
+    for (int y = 0; y < lattice.height; ++y) {
+      for (int x = 0; x < lattice.width; ++x) {
+        const auto index =
+            (static_cast<std::size_t>(z) * static_cast<std::size_t>(lattice.height) +
+             static_cast<std::size_t>(y)) *
+                static_cast<std::size_t>(lattice.width) +
+            static_cast<std::size_t>(x);
+        if (distances[index] >= 0.0F) {
+          occupancy->setState({x, y, z}, distances[index] == 0.0F
+                                             ? ObservedVoxelState::kOccupied
+                                             : ObservedVoxelState::kFree);
+        }
+      }
+    }
+  }
+  WorldSnapshot3D world;
+  world.grid = lattice;
+  world.distances_m = std::make_shared<const std::vector<float>>(std::move(distances));
+  world.observed_occupancy = std::move(occupancy);
+  return world;
+}
+
 [[nodiscard]] SweptFootprintConfig pointFootprint() {
   SweptFootprintConfig footprint;
   footprint.radius_m = 0.0;
@@ -70,7 +108,8 @@ TEST(ExecutedHorizonClearance3DTest, TheFirstUnobservedSampleEndsTheObservedRang
   // x = 9.5 sweeps into the unknown cells from x = 10: the observed range
   // along the motion is the nine metres travelled before that segment.
   const ExecutedHorizonClearance3D clearance = measureExecutedHorizonClearance3D(
-      horizonAlongX(0.5F, 15U), 0U, grid(), esdf(), pointFootprint(), 0.1);
+      horizonAlongX(0.5F, 15U), 0U, clearanceWorld(grid(), esdf()), pointFootprint(),
+      0.1);
   ASSERT_TRUE(clearance.available);
   EXPECT_TRUE(clearance.unobserved());
   EXPECT_NEAR(clearance.distanceToUnobservedM(), 9.0, 1.0e-6);
@@ -81,7 +120,8 @@ TEST(ExecutedHorizonClearance3DTest, TheFirstUnobservedSampleEndsTheObservedRang
 
 TEST(ExecutedHorizonClearance3DTest, AMotionThroughObservedSpaceHasNoFrontier) {
   const ExecutedHorizonClearance3D clearance = measureExecutedHorizonClearance3D(
-      horizonAlongX(0.5F, 8U), 0U, grid(), esdf(), pointFootprint(), 0.1);
+      horizonAlongX(0.5F, 8U), 0U, clearanceWorld(grid(), esdf()), pointFootprint(),
+      0.1);
   ASSERT_TRUE(clearance.available);
   EXPECT_FALSE(clearance.unobserved());
   EXPECT_TRUE(std::isinf(clearance.distanceToUnobservedM()));
@@ -90,7 +130,8 @@ TEST(ExecutedHorizonClearance3DTest, AMotionThroughObservedSpaceHasNoFrontier) {
 TEST(ExecutedHorizonClearance3DTest, TheRangeIsMeasuredFromTheRemainingMotion) {
   // Execution has advanced four states: the observed range is what remains.
   const ExecutedHorizonClearance3D clearance = measureExecutedHorizonClearance3D(
-      horizonAlongX(0.5F, 15U), 4U, grid(), esdf(), pointFootprint(), 0.1);
+      horizonAlongX(0.5F, 15U), 4U, clearanceWorld(grid(), esdf()), pointFootprint(),
+      0.1);
   ASSERT_TRUE(clearance.available);
   EXPECT_NEAR(clearance.distanceToUnobservedM(), 5.0, 1.0e-6);
 }
@@ -152,81 +193,17 @@ TEST(ExecutedHorizonClearance3DTest, TheRouteAheadReportsWhereItRunsClose) {
   // the segment that leaves station 5 sweeps through it, three metres ahead of
   // the projection, and the conservative query answers for less than the cell
   // distance because the sweep samples are not on its centre.
-  const ExecutedHorizonClearance3D clearance =
-      measureRouteClearance3D(routeAlongX(0.5, 20U), 2.0, 30.0, grid(),
-                              esdfWithTightColumn(6, 3.0F), pointFootprint(), 2.0);
+  const ExecutedHorizonClearance3D clearance = measureRouteClearance3D(
+      routeAlongX(0.5, 20U), 2.0, 30.0,
+      clearanceWorld(grid(), esdfWithTightColumn(6, 3.0F)), pointFootprint(), 2.0);
   ASSERT_TRUE(clearance.available);
   ASSERT_TRUE(clearance.constrained());
   EXPECT_NEAR(clearance.distanceToConstraintM(), 3.0, 1.0e-6);
   EXPECT_GT(clearance.constrainedClearanceM(), 0.0);
   EXPECT_LT(clearance.constrainedClearanceM(), 2.0);
-  EXPECT_DOUBLE_EQ(clearance.minimum_clearance_m, clearance.constrainedClearanceM());
-  // A point footprint is its own body: the body keeps the same clearance.
-  EXPECT_DOUBLE_EQ(clearance.constrained_samples.front().body_clearance_m,
-                   clearance.constrainedClearanceM());
 }
 
-// A true distance field to a wall plane at x = `wall_x_m` across the known
-// part of the lattice, so that a wider footprint keeps less of it.
-[[nodiscard]] std::vector<float> esdfToWallPlane(const float wall_x_m) {
-  std::vector<float> field = esdf();
-  for (int z = 0; z < 3; ++z) {
-    for (int y = 0; y < 3; ++y) {
-      for (int x = 0; x < kKnownLength; ++x) {
-        field[(static_cast<std::size_t>(z) * 3U + static_cast<std::size_t>(y)) *
-                  static_cast<std::size_t>(kLength) +
-              static_cast<std::size_t>(x)] =
-            std::abs(wall_x_m - (static_cast<float>(x) + 0.5F));
-      }
-    }
-  }
-  return field;
-}
-
-TEST(ExecutedHorizonClearance3DTest, TheBodyClearanceIsMeasuredWithTheBodyFootprint) {
-  // The conservative query answers for the whole 3D offset of every sample,
-  // so it is not monotone in the radius on a lattice; the property that
-  // holds exactly is that a body of the envelope's own size keeps the
-  // envelope's clearance, and a smaller body is measured on its own.
-  SweptFootprintConfig footprint = pointFootprint();
-  footprint.radius_m = 0.4;
-  footprint.body_radius_m = 0.4;
-  footprint.body_lower_extent_m = 0.0;
-  footprint.body_upper_extent_m = 0.0;
-  footprint.perimeter_samples = 8U;
-  footprint.radial_rings = 1U;
-  footprint.axial_samples = 2U;
-  const ExecutedHorizonClearance3D same = measureRouteClearance3D(
-      routeAlongX(0.5, 10U), 2.0, 7.0, grid(), esdfToWallPlane(9.5F), footprint, 2.0);
-  ASSERT_TRUE(same.constrained());
-  for (const ConstrainedHorizonSample3D& sample : same.constrained_samples) {
-    EXPECT_DOUBLE_EQ(sample.body_clearance_m, sample.clearance_m);
-  }
-
-  footprint.body_radius_m = 0.2;
-  const ExecutedHorizonClearance3D smaller = measureRouteClearance3D(
-      routeAlongX(0.5, 10U), 2.0, 7.0, grid(), esdfToWallPlane(9.5F), footprint, 2.0);
-  ASSERT_TRUE(smaller.constrained());
-  ASSERT_EQ(smaller.constrained_samples.size(), same.constrained_samples.size());
-  bool measured_on_its_own{false};
-  for (std::size_t index = 0U; index < smaller.constrained_samples.size(); ++index) {
-    const ConstrainedHorizonSample3D& sample = smaller.constrained_samples[index];
-    EXPECT_TRUE(std::isfinite(sample.body_clearance_m));
-    EXPECT_DOUBLE_EQ(sample.clearance_m, same.constrained_samples[index].clearance_m);
-    measured_on_its_own =
-        measured_on_its_own || sample.body_clearance_m != sample.clearance_m;
-  }
-  EXPECT_TRUE(measured_on_its_own);
-}
-
-TEST(ExecutedHorizonClearance3DTest, TheBodyClearanceCarriesTheEstimatesVerticalError) {
-  // Specification K27: the body's clearance to a floor is measured half a
-  // metre lower than the estimate puts the body, and to a ceiling half a
-  // metre higher (the camera estimator's height runs 0.3 to 0.6 m from the
-  // truth, r1183, r1184). A quarter-metre lattice over a floor at z = 0,
-  // the field the height above it: the body keeps half a metre less than
-  // the envelope of the same point. On the metre lattice of the other tests
-  // the shift is a whole cell, and beside a wall it takes nothing.
+TEST(ExecutedHorizonClearance3DTest, TheBodyMarginIncludesVerticalErrorDuringTheSweep) {
   const EsdfGrid3D lattice{.width = 8,
                            .height = 3,
                            .resolution_m = 0.25F,
@@ -235,47 +212,134 @@ TEST(ExecutedHorizonClearance3DTest, TheBodyClearanceCarriesTheEstimatesVertical
                            .depth = 12,
                            .origin_z_m = 0.0F,
                            .outside_is_unknown = true};
-  std::vector<float> field(8U * 3U * 12U, 0.0F);
-  for (int z = 0; z < 12; ++z) {
-    for (int y = 0; y < 3; ++y) {
-      for (int x = 0; x < 8; ++x) {
-        field[(static_cast<std::size_t>(z) * 3U + static_cast<std::size_t>(y)) * 8U +
-              static_cast<std::size_t>(x)] = 0.25F * (static_cast<float>(z) + 0.5F);
-      }
+  SweptFootprintConfig footprint = pointFootprint();
+  footprint.body_radius_m = 0.0;
+  footprint.body_lower_extent_m = 0.125;
+  footprint.body_upper_extent_m = 0.25;
+  std::vector<RouteSample3D> route;
+  route.reserve(3U);
+  for (int index = 0; index < 3; ++index) {
+    route.push_back(RouteSample3D{.position = {0.5 + 0.5 * index, 0.375, 1.125},
+                                  .tangent = {1.0, 0.0, 0.0},
+                                  .station_m = 0.5 * index});
+  }
+  for (const int occupied_z : {0, 10}) {
+    std::vector<float> field(std::size_t{8U} * 3U * 12U);
+    for (std::size_t index = 0U; index < field.size(); ++index) {
+      const int z = static_cast<int>(index / (std::size_t{8U} * 3U));
+      field[index] = 0.25F * static_cast<float>(std::abs(z - occupied_z));
+    }
+    const ExecutedHorizonClearance3D clearance = measureRouteClearance3D(
+        route, 0.0, 1.0, clearanceWorld(lattice, std::move(field)), footprint, 2.0);
+    ASSERT_TRUE(clearance.constrained());
+    // Floor top 0.25, or ceiling bottom 2.5. Include the physical axial extent
+    // and the full half-metre error toward that surface, not a radial inflation.
+    const double expected_margin_m = occupied_z == 0 ? 0.25 : 0.625;
+    for (const ConstrainedHorizonSample3D& sample : clearance.constrained_samples) {
+      EXPECT_NEAR(sample.body_clearance_m, expected_margin_m, 1.0e-9);
     }
   }
+}
+
+TEST(ExecutedHorizonClearance3DTest, ParallelWallMotionDoesNotBecomeAnApproach) {
+  const EsdfGrid3D lattice{.width = 8,
+                           .height = 8,
+                           .resolution_m = 0.25F,
+                           .origin_x_m = 0.0F,
+                           .origin_y_m = 0.0F,
+                           .depth = 8,
+                           .origin_z_m = 0.0F,
+                           .outside_is_unknown = true};
+  // Occupied voxels fill x = 0. The field stores the distance to their centres.
+  std::vector<float> field(std::size_t{8U} * 8U * 8U);
+  for (std::size_t index = 0U; index < field.size(); ++index) {
+    field[index] = 0.25F * static_cast<float>(index % 8U);
+  }
+  const WorldSnapshot3D world = clearanceWorld(lattice, std::move(field));
   SweptFootprintConfig footprint = pointFootprint();
   footprint.body_radius_m = 0.0;
   footprint.body_lower_extent_m = 0.0;
   footprint.body_upper_extent_m = 0.0;
-  footprint.axial_samples = 2U;
-  std::vector<RouteSample3D> route;
-  for (int index = 0; index < 3; ++index) {
-    route.push_back(RouteSample3D{.position = {0.5 + 0.5 * index, 0.375, 1.5},
-                                  .tangent = {1.0, 0.0, 0.0},
-                                  .station_m = 0.5 * index});
+  FiniteMotionHorizon3D horizon;
+  horizon.states.reserve(4U);
+  for (const float y : {0.365F, 0.385F, 0.405F, 0.425F}) {
+    MotionState3D state;
+    state.x = 0.375F;
+    state.y = y;
+    state.z = 1.125F;
+    horizon.states.push_back(state);
   }
-  const ExecutedHorizonClearance3D clearance =
-      measureRouteClearance3D(route, 0.0, 1.0, lattice, field, footprint, 2.0);
-  ASSERT_TRUE(clearance.constrained());
-  for (const ConstrainedHorizonSample3D& sample : clearance.constrained_samples) {
-    EXPECT_NEAR(sample.body_clearance_m, sample.clearance_m - 0.5, 0.13);
+  MppiSpeedPolicyConfig config;
+  config.clearance_response_time_s = 0.075;
+  config.clearance_minimum_progress_speed_mps = 3.0;
+  config.stopping_capability.reaction_latency_s = 0.1;
+  config.reference_tracking_lag_s = 0.3;
+  MppiSpeedPolicyInput input;
+  input.terminal_goal_limit_enabled = false;
+  input.executed_horizon_clearance =
+      measureExecutedHorizonClearance3D(horizon, 0U, world, footprint, 0.4875);
+  ASSERT_TRUE(input.executed_horizon_clearance->constrained());
+
+  // Every body pose stays 0.125 m from the wall, including the vertical-error
+  // probes. Moving across a voxel must not turn that into an approach to contact.
+  EXPECT_GE(evaluateMppiSpeedPolicy(config, input).clearance_limit_mps, 1.0);
+
+  // A real approach to the wall still loses the departure floor.
+  horizon.states[1U].x = 0.305F;
+  horizon.states[2U].x = 0.275F;
+  horizon.states[3U].x = 0.255F;
+  input.executed_horizon_clearance =
+      measureExecutedHorizonClearance3D(horizon, 0U, world, footprint, 0.4875);
+  EXPECT_LT(evaluateMppiSpeedPolicy(config, input).clearance_limit_mps, 1.0);
+
+  // The physical cylinder, not the wider validation envelope, owns this margin.
+  footprint.radius_m = 0.2;
+  footprint.body_radius_m = 0.1;
+  for (MotionState3D& state : horizon.states) {
+    state.x = 0.375F;
   }
-  // Against a wall beside the motion the error takes nothing.
-  SweptFootprintConfig wall_footprint = pointFootprint();
-  wall_footprint.radius_m = 0.4;
-  wall_footprint.body_radius_m = 0.4;
-  wall_footprint.body_lower_extent_m = 0.0;
-  wall_footprint.body_upper_extent_m = 0.0;
-  wall_footprint.perimeter_samples = 8U;
-  wall_footprint.radial_rings = 1U;
-  wall_footprint.axial_samples = 2U;
-  const ExecutedHorizonClearance3D wall =
-      measureRouteClearance3D(routeAlongX(0.5, 10U), 2.0, 7.0, grid(),
-                              esdfToWallPlane(9.5F), wall_footprint, 2.0);
-  ASSERT_TRUE(wall.constrained());
-  for (const ConstrainedHorizonSample3D& sample : wall.constrained_samples) {
-    EXPECT_DOUBLE_EQ(sample.body_clearance_m, sample.clearance_m);
+  const ExecutedHorizonClearance3D body =
+      measureExecutedHorizonClearance3D(horizon, 0U, world, footprint, 0.4875);
+  ASSERT_TRUE(body.constrained());
+  for (const ConstrainedHorizonSample3D& sample : body.constrained_samples) {
+    EXPECT_NEAR(sample.body_clearance_m, 0.025, 1.0e-9);
+  }
+}
+
+TEST(ExecutedHorizonClearance3DTest, TheBodyMarginIncludesContactBetweenStates) {
+  const EsdfGrid3D lattice{.width = 8,
+                           .height = 8,
+                           .resolution_m = 0.25F,
+                           .origin_x_m = 0.0F,
+                           .origin_y_m = 0.0F,
+                           .depth = 8,
+                           .origin_z_m = 0.0F,
+                           .outside_is_unknown = true};
+  std::vector<float> field(std::size_t{8U} * 8U * 8U, 1.0F);
+  field[(4U * 8U + 4U) * 8U + 4U] = 0.0F;
+  SweptFootprintConfig footprint = pointFootprint();
+  footprint.body_radius_m = 0.0;
+  footprint.body_lower_extent_m = 0.0;
+  footprint.body_upper_extent_m = 0.0;
+  FiniteMotionHorizon3D horizon;
+  horizon.states = {
+      MotionState3D{.x = 0.375F, .y = 1.125F, .z = 1.125F},
+      MotionState3D{.x = 1.875F, .y = 1.125F, .z = 1.125F},
+  };
+  for (const bool use_static : {false, true}) {
+    WorldSnapshot3D world = clearanceWorld(lattice, field);
+    if (use_static) {
+      auto occupancy =
+          std::make_shared<OccupancyGrid3D>(world.observed_occupancy->bounds());
+      occupancy->setOccupied({4, 4, 4});
+      world.observed_occupancy.reset();
+      world.static_occupancy = std::move(occupancy);
+    }
+    const ExecutedHorizonClearance3D clearance =
+        measureExecutedHorizonClearance3D(horizon, 0U, world, footprint, 2.0);
+    ASSERT_TRUE(clearance.constrained());
+    // Both endpoint bodies clear the voxel. The continuous motion crosses it.
+    EXPECT_DOUBLE_EQ(clearance.constrained_samples.front().body_clearance_m, 0.0);
   }
 }
 
@@ -408,9 +472,9 @@ TEST(ExecutedHorizonClearance3DTest, AHorizonMayNotCarrySpeedAlongAMotionNothing
 }
 
 TEST(ExecutedHorizonClearance3DTest, TheRouteClearanceStopsAtTheLookahead) {
-  const ExecutedHorizonClearance3D near =
-      measureRouteClearance3D(routeAlongX(0.5, 20U), 2.0, 2.0, grid(),
-                              esdfWithTightColumn(6, 3.0F), pointFootprint(), 2.0);
+  const ExecutedHorizonClearance3D near = measureRouteClearance3D(
+      routeAlongX(0.5, 20U), 2.0, 2.0,
+      clearanceWorld(grid(), esdfWithTightColumn(6, 3.0F)), pointFootprint(), 2.0);
   ASSERT_TRUE(near.available);
   EXPECT_FALSE(near.constrained());
 }
@@ -418,8 +482,9 @@ TEST(ExecutedHorizonClearance3DTest, TheRouteClearanceStopsAtTheLookahead) {
 TEST(ExecutedHorizonClearance3DTest, TheRouteClearanceIgnoresUnobservedSpace) {
   // Unknown space stays traversable and carries no clearance, so a route that
   // leaves the observed cells reports no constraint and no frontier here.
-  const ExecutedHorizonClearance3D clearance = measureRouteClearance3D(
-      routeAlongX(0.5, 20U), 2.0, 30.0, grid(), esdf(), pointFootprint(), 2.0);
+  const ExecutedHorizonClearance3D clearance =
+      measureRouteClearance3D(routeAlongX(0.5, 20U), 2.0, 30.0,
+                              clearanceWorld(grid(), esdf()), pointFootprint(), 2.0);
   ASSERT_TRUE(clearance.available);
   EXPECT_FALSE(clearance.constrained());
   EXPECT_FALSE(clearance.unobserved());

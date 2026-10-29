@@ -16,17 +16,18 @@
 
 namespace drone_city_nav {
 
-// A sample of the motion under execution whose body clearance falls below the
-// constraint threshold: how far along the remaining motion it lies, and the
-// clearance there.
+struct WorldSnapshot3D;
+
+// A sample whose validation-envelope clearance falls below the constraint
+// threshold: how far along the remaining motion it lies, and its margins.
 struct ConstrainedHorizonSample3D {
   double distance_m{0.0};
   double clearance_m{0.0};
-  // The clearance the physical body itself keeps there, less the estimate's
-  // vertical error (specification K27). The envelope's clearance is what the
-  // tube law prices; where the envelope already stands in evidence, the
-  // body's is the only margin left and bounds the reference by itself.
-  // Infinite when it was not measured.
+  // Conservative swept-body inflation margin against raw occupied voxel boxes
+  // from the same world snapshot, including the estimate's vertical error
+  // (specification K27). Unlike ESDF lower bounds, this does not acquire a
+  // voxel-phase gradient during motion parallel to a flat wall.
+  // Capped at the constraint threshold; infinite when raw evidence is absent.
   double body_clearance_m{std::numeric_limits<double>::infinity()};
 };
 
@@ -47,7 +48,7 @@ struct ExecutedHorizonClearance3D {
   bool available{false};
   // Every sample below the constraint threshold, nearest first.
   std::vector<ConstrainedHorizonSample3D> constrained_samples;
-  // Smallest body clearance anywhere on the remaining motion, for diagnostics.
+  // Smallest envelope clearance on the remaining motion, for diagnostics.
   double minimum_clearance_m{std::numeric_limits<double>::infinity()};
   // Path length along the remaining motion to the first sample whose body
   // envelope reaches space the evidence has not observed. Unknown space is not
@@ -69,7 +70,7 @@ struct ExecutedHorizonClearance3D {
                          : std::numeric_limits<double>::infinity();
   }
 
-  // Body clearance at the first constrained sample.
+  // Envelope clearance at the first constrained sample.
   [[nodiscard]] double constrainedClearanceM() const noexcept {
     return constrained() ? constrained_samples.front().clearance_m
                          : std::numeric_limits<double>::infinity();
@@ -94,8 +95,8 @@ struct ExecutedHorizonClearance3D {
 // such sample is recorded as the end of the observed range along the motion.
 [[nodiscard]] ExecutedHorizonClearance3D measureExecutedHorizonClearance3D(
     const FiniteMotionHorizon3D& horizon, std::size_t first_remaining_state_index,
-    const EsdfGrid3D& grid, std::span<const float> esdf_m,
-    const SweptFootprintConfig& footprint, double constraint_clearance_m);
+    const WorldSnapshot3D& world, const SweptFootprintConfig& footprint,
+    double constraint_clearance_m);
 
 // Route length from `from_station_m` to the start of the first route segment
 // whose body envelope reaches space the evidence has not observed, probing no
@@ -161,9 +162,10 @@ measureObservedRangeAlong3D(const ObservedOccupancyGrid3D& occupancy,
 // bounds the speed before the horizon grows into the constraint. Unobserved
 // space is not reported here: it is a constraint on the sensor-braking range,
 // which the route already answers for through measureRouteObservedRange3D.
-[[nodiscard]] ExecutedHorizonClearance3D measureRouteClearance3D(
-    std::span<const RouteSample3D> route, double from_station_m, double lookahead_m,
-    const EsdfGrid3D& grid, std::span<const float> esdf_m,
-    const SweptFootprintConfig& footprint, double constraint_clearance_m);
+[[nodiscard]] ExecutedHorizonClearance3D
+measureRouteClearance3D(std::span<const RouteSample3D> route, double from_station_m,
+                        double lookahead_m, const WorldSnapshot3D& world,
+                        const SweptFootprintConfig& footprint,
+                        double constraint_clearance_m);
 
 } // namespace drone_city_nav

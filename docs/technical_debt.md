@@ -200,8 +200,24 @@ laid out on 2026-09-25, with the effort and the quality each was given.
 
 | Debt | Measured | Class | Found by |
 |---|---|---|---|
-| The lidar profile's mean flight speed has little margin over its requirement; a flight under it fails. Most of what it loses is no-route holds at surfaces. | 2.42 m/s against 2.4 (r587); 2.42 to 2.67 over r584 to r588; 2.49 to 2.72 over r612 to r616, and 2.29 on r605 before the curvature law's inputs were corrected; in item 17 2.26, 2.18 and 2.26 on r835, r842 and r958 (27, 13 and 36 s in the shaft room below, and 10 s under a tunnel's roof on r842) among 2.48 to 2.68; with the sensors mounted where the extrinsics say, 2.48 to 3.12, mean 2.71, none under 2.4 (r988 to r992) | (a) | items 9 and 16 |
+| The lidar profile's mean flight speed has little margin over its requirement; a flight under it fails. Route holds and clearance-limited motion both contribute and must be separated by flight evidence. | 2.42 m/s against 2.4 (r587); 2.42 to 2.67 over r584 to r588; 2.49 to 2.72 over r612 to r616, and 2.29 on r605 before the curvature law's inputs were corrected; in item 17 2.26, 2.18 and 2.26 on r835, r842 and r958 (27, 13 and 36 s in the shaft room below, and 10 s under a tunnel's roof on r842) among 2.48 to 2.68; with the sensors mounted where the extrinsics say, 2.48 to 3.12, mean 2.71, none under 2.4 (r988 to r992) | (a) | items 9 and 16 |
 | The braking laws flicker: the reference falls by more than 1 m/s and returns within 2 s 32 to 52 times per camera flight (p50 0.35 s long; the sensor-braking law at the bottom of 60 to 75 percent of them) and 25 to 34 times per lidar flight (p50 0.78 s; the clearance and route-clearance laws). Flip by flip (r632 to r642): two thirds of the camera flips and their price are route replacement transients (a no-route gap of 0.1 to 0.2 s, 14 to 26 per flight; a fresh route whose first tick reads a law low, 6 to 8 percent of the 150 to 180 replacements a flight; a route replaced twice within a second), the rest the clearance laws at walls; on the lidar half of them are the clearance laws. The return was the price: the reference climbed from its fallen level at 4 m/s^2 while the vehicle still flew, sat rise-limited below the actual speed for 10.3 s per camera flight and 14.8 s per lidar flight, and the route-directed seed braked the vehicle toward it. ccf6bd6d starts the climb from the actual speed: that time is 0.3 to 1.9 s on the camera series r644 to r648 and 1.5 to 6.0 s on the lidar series r650 to r654, the speed lost per flip p50 0.12 to 0.02-0.11 m/s, the flips' count unchanged; the mean speed did not move on cameras (1.791 against 1.798) and rose 1.8 percent on the lidar (2.665 against 2.617), inside the spread, because after a flip the recovery is bounded by the horizon's own law (the connector's (4 / 3)(reference - speed) on straight intervals), not by the reference. What remains is the falls: the route churn (a route every 0.4 to 0.5 s on cameras, half of them shorter than 0.5 s) and the no-route gaps are the planner's (P5), the walls' falls the clearance laws' (P1); the planner's part is measured with P5 in roadmap item 17 stage 8. Decided 2026-09-25: the investigation first; repaired in part on 2026-09-26. | 32 to 52 flips per camera flight, 25 to 34 per lidar flight; the return repaired, the falls remain | (b) | investigations goal 2026-09-25; S4 goal 2026-09-26 |
+
+The 2026-10-29 investigation of `p2_20261027_l03` separates another clearance
+defect from route availability. That valid flight failed at 2.399 m/s on
+`ab1bddd`; its 50–60 s slow interval remained planned, with valid finite paths,
+while the clearance reference fell to 0.036 m/s. A deterministic producer-to-
+policy regression proves that voxel-phase-dependent ESDF lower bounds can
+misclassify both parallel-wall motion and a genuine approach. The body-margin
+input now uses conservative raw-voxel sweep geometry, without changing the
+speed floors, braking laws, vertical allowance, or collision validators.
+
+The original recording omitted the body-margin field and its raw snapshots do
+not cover that slow interval's location; the exact share of its delay caused
+by this defect cannot be replayed. The longer detour has not been shown wrong,
+and this correction does not close the planner/exploration debt or retroactively
+pass the rejected series. Reproduction, aligned timing, and the attribution
+limits are retained in `log/tools/diagnostics/navigation-speed-20261029/`.
 
 ## Camera Perception
 
