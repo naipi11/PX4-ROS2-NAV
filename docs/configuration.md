@@ -355,6 +355,19 @@ It gives the goal up as well for the carried light's battery and for a light
 judged unreliable from the frames (specification K11, K12; the constants are
 in `carried_light_judgment.hpp`), and on the way home it hands the planner
 the trail it flew, point by point (`return_trail.hpp`, K20).
+
+`stereo_depth_node` and `visual_inertial_odometry_node` take the rectified
+pair's common square-pixel `focal_px`, `principal_x_px`, `principal_y_px`,
+`image_width`, `image_height` and `baseline_m`. `horizontal_fov_rad` is no
+longer a camera parameter. Both nodes expect images already rectified with
+matching principal points and positive left-minus-right disparity. The VIO
+node also takes `left_camera_position_body_frd_m` and
+`rectified_optical_to_body_frd_quaternion_wxyz`; the right optical center is
+one baseline along the rectified optical x axis. Its IMU noise and bias walks,
+`frame_stamp_offset_s`, and `rotor_drag_1ps` must be set for the actual sensor
+and airframe. A calibrated depth cloud's FLU-to-body extrinsic must also be
+configured independently at obstacle memory; a frame name alone does not apply it.
+
 `visual_inertial_odometry_node` fuses the rotors' drag: `rotor_drag_1ps`
 (0.106, a parameter) is this airframe's and must be fitted again for another
 vehicle, as the accelerometer's reading across the rotor axis against the

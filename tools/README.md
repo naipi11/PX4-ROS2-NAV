@@ -98,6 +98,42 @@ on recordings before any flight.
 | `vio/build_replay_src.sh`, `vio/replay_vio.cpp` | Builds the replay against the tree's `visual_inertial_odometry.cpp` and a tracker source. Options are `key=value`: `dark_from_s`, `dark_to_s` (frames blanked), `baro=1`, `drag=<1/s>`, `tag=<name>`; output `replay_<tag>.csv` beside the record. | inside the container: `bash /workspace/tools/vio/build_replay_src.sh /workspace/drone_city_nav/src/stereo_feature_tracker.cpp replay_vio` |
 | `vio/drag_bench.sh`, `vio/drag_report.py` | Dark-window replays of two recorded flights with and without the rotor drag fusion (specification K21), and the drift table. | inside the container the bench, then `python3 tools/vio/drag_report.py` |
 | `vio/dark_drift.py` | Position error of dark-window replays against the lit replay. | `python3 tools/vio/dark_drift.py log/tools/replay/r779` |
+| `vio/convert_euroc.py` | Rectifies an ASL-format EuRoC stereo recording using its camera, IMU and Vicon calibration; retains original timing and exports Vicon only as a reference. Requires OpenCV, NumPy, SciPy and PyYAML. | Inside the container: `python3 tools/vio/convert_euroc.py log/tools/vio/real-data/V1_01_easy/mav0 log/tools/vio/real-data/v1_01_record` (output must not exist). |
+| `vio/trajectory_report.py`, `vio/pair_reference.py` | Score a paired trajectory and associate a separately produced reference trajectory. Initial position/yaw alignment is optional; no scale is fitted. | `python3 tools/vio/trajectory_report.py RECORD/replay_euroc_full.csv --output RECORD/report.json` |
+| `vio/replay_memory.py` | Runs actual ROS stereo depth and 3D obstacle memory on a calibrated record and healthy VIO estimates. Relays each received depth cloud once and captures the matching final raw snapshot; timeout fails rather than inventing an acknowledgement. | Inside the container, source `install/setup.bash`, then run `python3 tools/vio/replay_memory.py --record RECORD --estimate RECORD/replay_euroc_memory.csv --output-dir NEW_OUTPUT --max-frames 100`. |
+| `lio/convert_ntu_viral.py` | Extracts original-stamp Ouster scans, VectorNav IMU and separate Leica prism positions from an NTU VIRAL ROS 1 bag. Requires NumPy, PyYAML and `rosbags` in the evaluation environment; `rosbags` is not a production dependency. | `python3 tools/lio/convert_ntu_viral.py BAG CALIBRATION_DIR NEW_RECORD` |
+| `lio/build_replay.sh`, `lio/replay_lio.cpp`, `lio/compare_prism.py` | Builds the LIO-core replay, then compares the estimated prism position with the independently measured Leica position. The full-fit and prefix-fit holdout are reported separately. | Inside the container: `bash tools/lio/build_replay.sh replay_lio_ntu`; run `/workspace/log/tools/lio/replay_lio_ntu RECORD RECORD/lio_estimate.csv 0 2000000000`, then `python3 tools/lio/compare_prism.py RECORD/lio_estimate.csv RECORD/prism_reference.csv RECORD/metadata.json --report RECORD/lio_prism_report.json --paired RECORD/lio_prism_paired.csv`. |
+
+For the real-recording Python tools in the project container, put the system
+NumPy/SciPy packages first to avoid mixing an incompatible user-installed
+NumPy with the distribution's SciPy:
+
+```bash
+export PYTHONPATH=/usr/lib/python3/dist-packages${PYTHONPATH:+:$PYTHONPATH}
+```
+
+For the EuRoC run reported in [`docs/localization.md`](../docs/localization.md),
+build and run inside the container:
+
+```bash
+bash tools/vio/build_replay_src.sh /workspace/drone_city_nav/src/stereo_feature_tracker.cpp replay_vio_real
+/workspace/log/tools/vio/replay_vio_real /workspace/log/tools/vio/real-data/v1_01_record \
+  calibration=/workspace/log/tools/vio/real-data/v1_01_record/calibration.json \
+  rest_start_s=2 start_s=4 tag=euroc_memory
+```
+
+The evaluated inputs are [EuRoC V1_01_easy](https://projects.asl.ethz.ch/datasets/euroc-mav)
+(the [pinned archive mirror](https://huggingface.co/datasets/pepijn223/euroc-mirror/resolve/d05bd6a92a5f456562153f83d65805fea27cb57d/V1_01_easy.zip),
+SHA-256 `a920fe5b5e69a6ad19b32f1cfaf90ac2f59d45dfd1ca18cc9722e07684ba45fa`)
+and [NTU VIRAL eee_03](https://ntu-aris.github.io/ntu_viral_dataset/)
+([pinned archive](https://huggingface.co/datasets/Yuan-Shenghai/NTU-VIRAL-DATASET/resolve/4a1b869551e7baff1eb6157a61c2f5c3e3d5ffbd/sequences/eee_03.zip),
+SHA-256 `c842b269cbc9c31788b22095d49e49814499769ef22df9a0728c9e7f2a0f8b94`).
+
+The two public recordings' own licenses restrict them to non-commercial use.
+The reference results, dataset provenance and investigation scripts are kept on
+the evaluation host in `log/tools/vio/real-data/.keep`; the datasets are not
+part of the source tree. Both replays are open-loop and cannot prove flight
+safety, camera braking range, or real-time performance.
 
 One-off diagnostics written for a single investigation stay in
 `log/tools/diagnostics/` and are not tracked; the goal journals in

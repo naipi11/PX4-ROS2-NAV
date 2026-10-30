@@ -117,14 +117,6 @@ struct MapFrameOffset {
   }
 };
 
-// The optical frame (x right, y down, z forward) of a camera that looks along
-// the body's x axis, in the body forward-right-down frame.
-[[nodiscard]] Eigen::Matrix3d forwardCameraToBody() {
-  Eigen::Matrix3d camera_to_body;
-  camera_to_body << 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0;
-  return camera_to_body;
-}
-
 class VisualInertialOdometryNode final : public rclcpp::Node {
 public:
   explicit VisualInertialOdometryNode(const rclcpp::NodeOptions& options)
@@ -134,42 +126,63 @@ public:
         .shared_clock = declare_parameter<bool>("px4_clock_is_ros_clock", false)}};
 
     StereoFeatureTrackerConfig tracker;
-    tracker.image_width = static_cast<std::size_t>(
-        declare_parameter<int>("image_width", static_cast<int>(tracker.image_width)));
-    tracker.image_height = static_cast<std::size_t>(
-        declare_parameter<int>("image_height", static_cast<int>(tracker.image_height)));
-    tracker.horizontal_fov_rad =
-        declare_parameter<double>("horizontal_fov_rad", tracker.horizontal_fov_rad);
+    const auto image_width =
+        declare_parameter<int>("image_width", static_cast<int>(tracker.image_width));
+    const auto image_height =
+        declare_parameter<int>("image_height", static_cast<int>(tracker.image_height));
+    if (image_width <= 0 || image_height <= 0 ||
+        image_width > std::numeric_limits<int>::max() ||
+        image_height > std::numeric_limits<int>::max()) {
+      throw std::invalid_argument{"invalid stereo image dimensions"};
+    }
+    tracker.image_width = static_cast<std::size_t>(image_width);
+    tracker.image_height = static_cast<std::size_t>(image_height);
+    tracker.focal_px = declare_parameter<double>("focal_px", tracker.focal_px);
+    tracker.principal_x_px =
+        declare_parameter<double>("principal_x_px", tracker.principal_x_px);
+    tracker.principal_y_px =
+        declare_parameter<double>("principal_y_px", tracker.principal_y_px);
     tracker.maximum_features = static_cast<std::size_t>(declare_parameter<int>(
         "maximum_features", static_cast<int>(tracker.maximum_features)));
     image_width_ = tracker.image_width;
     image_height_ = tracker.image_height;
     tracker_ = std::make_unique<StereoFeatureTracker>(tracker);
 
-    // The pair sits on the body as the obstacle memory knows it: the left
-    // camera's position, the right one a baseline along the body's y axis.
     const std::vector<double> left = declare_parameter<std::vector<double>>(
         "left_camera_position_body_frd_m", {0.32, -0.10, -0.02});
-    if (left.size() != 3U) {
-      throw std::invalid_argument{"the left camera position needs three values"};
+    const std::vector<double> quaternion = declare_parameter<std::vector<double>>(
+        "rectified_optical_to_body_frd_quaternion_wxyz", {0.5, 0.5, 0.5, 0.5});
+    if (left.size() != 3U || quaternion.size() != 4U) {
+      throw std::invalid_argument{"invalid rectified stereo mount dimensions"};
     }
-    const double baseline_m = declare_parameter<double>("baseline_m", 0.20);
-    left_camera_body_ = Eigen::Vector3d{left[0], left[1], left[2]};
-    camera_to_body_ = forwardCameraToBody();
+    RectifiedStereoMount mount;
+    mount.left_body_m = Eigen::Vector3d{left[0], left[1], left[2]};
+    mount.optical_to_body =
+        Eigen::Quaterniond{quaternion[0], quaternion[1], quaternion[2], quaternion[3]};
+    mount.baseline_m = declare_parameter<double>("baseline_m", 0.20);
+    if (!mount.valid()) {
+      throw std::invalid_argument{"invalid rectified stereo mount"};
+    }
+    stereo_mount_ = mount;
+    camera_to_body_ = mount.optical_to_body.toRotationMatrix();
     VisualInertialOdometryConfig config;
-    config.left_camera = {.camera_to_body = Eigen::Quaterniond{camera_to_body_},
-                          .position_body_m = {left[0], left[1], left[2]}};
-    config.right_camera = {.camera_to_body = Eigen::Quaterniond{camera_to_body_},
-                           .position_body_m = {left[0], left[1] + baseline_m, left[2]}};
+    config.left_camera = {.camera_to_body = mount.optical_to_body,
+                          .position_body_m = mount.left_body_m};
+    config.right_camera = {.camera_to_body = mount.optical_to_body,
+                           .position_body_m = mount.rightBodyM()};
     config.maximum_clones = static_cast<std::size_t>(declare_parameter<int>(
         "maximum_clones", static_cast<int>(config.maximum_clones)));
-    config.observation_noise = declare_parameter<double>("observation_noise_px", 1.0) /
-                               (0.5 * static_cast<double>(tracker.image_width) /
-                                std::tan(0.5 * tracker.horizontal_fov_rad));
+    config.observation_noise =
+        declare_parameter<double>("observation_noise_px", 1.0) / tracker.focal_px;
     config.gyro_noise_radps_sqrt_hz = declare_parameter<double>(
         "gyro_noise_radps_sqrt_hz", config.gyro_noise_radps_sqrt_hz);
     config.accelerometer_noise_mps2_sqrt_hz = declare_parameter<double>(
         "accelerometer_noise_mps2_sqrt_hz", config.accelerometer_noise_mps2_sqrt_hz);
+    config.gyro_bias_walk_radps2_sqrt_hz = declare_parameter<double>(
+        "gyro_bias_walk_radps2_sqrt_hz", config.gyro_bias_walk_radps2_sqrt_hz);
+    config.accelerometer_bias_walk_mps3_sqrt_hz =
+        declare_parameter<double>("accelerometer_bias_walk_mps3_sqrt_hz",
+                                  config.accelerometer_bias_walk_mps3_sqrt_hz);
     // The airframe's: fitted per vehicle (visual_inertial_odometry.hpp).
     config.rotor_drag_1ps =
         declare_parameter<double>("rotor_drag_1ps", config.rotor_drag_1ps);
@@ -575,7 +588,7 @@ private:
           flu.norm() > kMapRangeM) {
         continue;
       }
-      body.push_back(Eigen::Vector3d{flu.x(), -flu.y(), -flu.z()} + left_camera_body_);
+      body.push_back(stereo_mount_.cameraFluToBody(flu));
     }
     std::vector<Eigen::Vector3d> thinned;
     // A frame too dense for the budget is thinned coarser, not sampled, as
@@ -774,7 +787,7 @@ private:
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr depth_sub_;
   PointPlaneMap3D map_{PointPlaneMapConfig3D{
       .cell_m = kMapCellM, .maximum_points_per_cell = kMapPointsPerCell}};
-  Eigen::Vector3d left_camera_body_{Eigen::Vector3d::Zero()};
+  RectifiedStereoMount stereo_mount_{};
   std::int64_t last_map_registration_ns_{0};
   std::uint64_t map_registrations_{0U};
   std::uint64_t map_corrections_{0U};

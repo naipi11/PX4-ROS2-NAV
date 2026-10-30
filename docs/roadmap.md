@@ -1195,18 +1195,19 @@ vehicle is home in truth, on either sensor set.
 ## 25. The Estimator On Real Recordings
 
 **Type:** validation without a vehicle. Discussed with the project owner on
-2026-10-09 and recorded; not started.
+2026-10-09; the first real stereo and lidar recordings were replayed on
+2026-10-30.
 
 **Hard prerequisites:** none. It needs no hardware and no simulator.
 
-The offline replay of the visual-inertial estimator (`tools/vio/replay_vio.cpp`,
-`tools/vio/dark_drift.py`) runs the filter over a flight's record (frames, IMU,
-truth) with no simulator. The records come from Gazebo today; the same replay
-can take a public recording from a real vehicle, and that is the only way,
-without a vehicle, to learn how the estimator behaves on real sensor noise
-and whether anything in it is fitted to Gazebo. It also carries the debt of
-the reference visual-inertial system ([technical_debt.md](technical_debt.md),
-Localization): the reference and ours can be compared on the same record.
+The offline VIO replay now accepts calibrated EuRoC frames and IMU, with raw
+Vicon transformed to the IMU origin for evaluation; OpenVINS was run separately
+on the same recording. The LIO replay accepts real calibrated lidar/IMU scans
+and compares the estimated prism position with NTU VIRAL's Leica measurements.
+The first results, their initialization and alignment, and their limitations
+are in [`localization.md`](localization.md). The stereo depth and obstacle-memory
+path was also exercised on recorded images; its one-sided laser comparison is
+in [`camera_perception.md`](camera_perception.md).
 
 Candidate recordings, all public, each with a calibration and a reference
 trajectory in the role Gazebo's truth plays here:
@@ -1222,29 +1223,20 @@ trajectory in the role Gazebo's truth plays here:
 - SubT-MRS: underground, darkness, smoke, dust, with lidar, cameras and a
   thermal camera: the material of items 17, 18, 22 and 23.
 
-What it takes, in order:
+The EuRoC converter rectifies the two raw cameras from their measured
+intrinsics, distortion and mounts, records the common projection and IMU
+noise, and keeps one integer-nanosecond epoch. The depth and VIO nodes now take
+the rectified focal length and principal point explicitly. The NTU converter
+preserves the original lidar and IMU header stamps and exports Leica positions
+separately. Its first LIO replay treats each spinning scan as rigid; it does not
+deskew or pretend Leica supplied orientation.
 
-1. A converter from the recording's layout (images, IMU CSV, reference CSV)
-   to the replay's record. Small for EuRoC.
-2. The camera model as configuration, not geometry derived from the field of
-   view: `stereo_depth_node` and the estimator take the intrinsics from
-   `horizontal_fov_rad` and the image size (1280 x 960) and treat the pair as
-   ideal and rectified, which Gazebo's cameras are and real ones are not.
-   Intrinsics, distortion, the baseline, the camera-to-IMU extrinsics, the
-   IMU's noise and the time offset come from the recording's calibration,
-   and the frames are rectified first.
-3. The comparison with the reference the way `dark_drift.py` compares with
-   the truth.
-
-The same path serves the stereo depth and the obstacle memory, fed with the
-recording's frames, and the lidar-inertial estimator with the recording's
-clouds.
-
-What it cannot show: the loop is open. The vehicle in the recording flew as
-it flew and does not answer to the stack, so the planner, the control and the
-braking contract stay in the simulator. A first step that fits in a day: one
-EuRoC sequence through the replay; the drift against the reference beside the
-0.1 to 0.4 percent of the path the simulator shows.
+The first step is measured, not a general real-world acceptance: more
+recordings, sensor-specific timing and distortion, long-lived mapping and
+the limits of the one-sided memory comparison remain to be examined. Neither
+record can validate closed-loop planning, control or braking. The historical
+simulator reference-system comparison remains open in
+[`technical_debt.md`](technical_debt.md).
 
 ## 26. GPU Offload
 

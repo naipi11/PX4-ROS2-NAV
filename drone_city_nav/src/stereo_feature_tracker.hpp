@@ -3,6 +3,8 @@
 #include "drone_city_nav/visual_inertial_odometry.hpp"
 
 #include <Eigen/Core>
+#include <Eigen/Geometry>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -13,9 +15,8 @@
 // followed from frame to frame and matched into the right image of the same
 // frame, handed to the filter as normalized coordinates under stable ids.
 // OpenCV lives here and nowhere in the estimator's library. The pair is
-// rectified and ideal, as the simulated cameras are: one focal length, the
-// principal point at the image centre, the right camera displaced along the
-// image x axis.
+// rectified: common square-pixel intrinsics and the right camera
+// displaced along the optical x axis.
 
 namespace cv {
 class Mat;
@@ -26,7 +27,9 @@ namespace drone_city_nav {
 struct StereoFeatureTrackerConfig {
   std::size_t image_width{1280U};
   std::size_t image_height{960U};
-  double horizontal_fov_rad{2.0943951023931953};
+  double focal_px{369.5041722813606};
+  double principal_x_px{640.0};
+  double principal_y_px{480.0};
   // Corners kept alive, spread over a grid of cells so one textured wall does
   // not take them all.
   std::size_t maximum_features{200U};
@@ -45,6 +48,27 @@ struct StereoFeatureTrackerConfig {
   double maximum_disparity_px{256.0};
   // Frame-to-frame outliers are removed against the epipolar geometry.
   double epipolar_ransac_threshold_px{1.0};
+};
+
+// The quaternion rotates rectified optical directions into body FRD.
+struct RectifiedStereoMount {
+  Eigen::Quaterniond optical_to_body{0.5, 0.5, 0.5, 0.5};
+  Eigen::Vector3d left_body_m{0.32, -0.10, -0.02};
+  double baseline_m{0.20};
+
+  [[nodiscard]] bool valid() const noexcept {
+    return optical_to_body.coeffs().allFinite() &&
+           std::abs(optical_to_body.squaredNorm() - 1.0) < 1.0e-6 &&
+           left_body_m.allFinite() && std::isfinite(baseline_m) && baseline_m > 0.0;
+  }
+
+  [[nodiscard]] Eigen::Vector3d rightBodyM() const {
+    return left_body_m + optical_to_body * Eigen::Vector3d{baseline_m, 0.0, 0.0};
+  }
+
+  [[nodiscard]] Eigen::Vector3d cameraFluToBody(const Eigen::Vector3d& flu) const {
+    return left_body_m + optical_to_body * Eigen::Vector3d{-flu.y(), -flu.z(), flu.x()};
+  }
 };
 
 struct StereoFeatureTrackerReport {

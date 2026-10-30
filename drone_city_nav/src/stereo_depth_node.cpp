@@ -17,6 +17,7 @@
 #include <cmath>
 #include <cstdint>
 #include <deque>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <numbers>
@@ -62,17 +63,19 @@ class StereoDepthNode final : public rclcpp::Node {
 public:
   explicit StereoDepthNode(const rclcpp::NodeOptions& options)
       : rclcpp::Node{"stereo_depth_node", options} {
-    const double horizontal_fov_rad =
-        declare_parameter<double>("horizontal_fov_rad", 2.0943951023931953);
-    image_width_ =
-        static_cast<std::size_t>(declare_parameter<int>("image_width", 1280));
-    image_height_ =
-        static_cast<std::size_t>(declare_parameter<int>("image_height", 960));
+    const auto image_width = declare_parameter<int>("image_width", 1280);
+    const auto image_height = declare_parameter<int>("image_height", 960);
+    if (image_width <= 0 || image_height <= 0 ||
+        image_width > std::numeric_limits<int>::max() ||
+        image_height > std::numeric_limits<int>::max()) {
+      throw std::invalid_argument{"invalid stereo image dimensions"};
+    }
+    image_width_ = static_cast<std::size_t>(image_width);
+    image_height_ = static_cast<std::size_t>(image_height);
     geometry_ = StereoPairGeometry{
-        .focal_px = 0.5 * static_cast<double>(image_width_) /
-                    std::tan(0.5 * horizontal_fov_rad),
-        .principal_x_px = 0.5 * static_cast<double>(image_width_),
-        .principal_y_px = 0.5 * static_cast<double>(image_height_),
+        .focal_px = declare_parameter<double>("focal_px", 369.5041722813606),
+        .principal_x_px = declare_parameter<double>("principal_x_px", 640.0),
+        .principal_y_px = declare_parameter<double>("principal_y_px", 480.0),
         .baseline_m = declare_parameter<double>("baseline_m", 0.20),
     };
     returns_config_.pixel_stride =

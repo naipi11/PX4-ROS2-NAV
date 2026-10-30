@@ -6,6 +6,7 @@
 #include <opencv2/core.hpp>
 #include <opencv2/imgproc.hpp>
 #include <opencv2/video/tracking.hpp>
+#include <stdexcept>
 
 namespace drone_city_nav {
 namespace {
@@ -55,10 +56,14 @@ template<typename T> void keep(std::vector<T>& values, const std::vector<bool>& 
 struct StereoFeatureTracker::Impl {
   explicit Impl(const StereoFeatureTrackerConfig& configuration)
       : config_{configuration},
-        focal_px_{0.5 * static_cast<double>(configuration.image_width) /
-                  std::tan(0.5 * configuration.horizontal_fov_rad)},
-        centre_px_{0.5F * static_cast<float>(configuration.image_width),
-                   0.5F * static_cast<float>(configuration.image_height)} {
+        focal_px_{configuration.focal_px},
+        centre_px_{configuration.principal_x_px, configuration.principal_y_px} {
+    if (configuration.image_width == 0U || configuration.image_height == 0U ||
+        !std::isfinite(configuration.focal_px) || configuration.focal_px <= 0.0 ||
+        !std::isfinite(configuration.principal_x_px) ||
+        !std::isfinite(configuration.principal_y_px)) {
+      throw std::invalid_argument{"invalid rectified camera intrinsics"};
+    }
   }
 
   [[nodiscard]] std::vector<StereoFeatureObservation>
@@ -67,7 +72,7 @@ struct StereoFeatureTracker::Impl {
 
   StereoFeatureTrackerConfig config_;
   double focal_px_{1.0};
-  cv::Point2f centre_px_;
+  cv::Point2d centre_px_;
   std::vector<cv::Mat> previous_left_pyramid_;
   std::vector<cv::Point2f> points_;
   std::vector<float> disparities_;
@@ -155,8 +160,8 @@ std::vector<StereoFeatureObservation> StereoFeatureTracker::Impl::track(
                             (point.y - centre_px_.y) / focal_px_, 1.0};
         if (turned.z() > 1.0e-3) {
           const cv::Point2f predicted{
-              static_cast<float>(focal_px_ * turned.x() / turned.z()) + centre_px_.x,
-              static_cast<float>(focal_px_ * turned.y() / turned.z()) + centre_px_.y};
+              static_cast<float>(focal_px_ * turned.x() / turned.z() + centre_px_.x),
+              static_cast<float>(focal_px_ * turned.y() / turned.z() + centre_px_.y)};
           if (inside(predicted)) {
             point = predicted;
           }

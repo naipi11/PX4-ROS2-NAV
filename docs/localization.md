@@ -443,3 +443,52 @@ cores and 90 MB of map. A first pass through new ground drifts as before, 0.1
 to 0.4 percent of the path: nothing old lies there to register against. The
 lidar estimator is unchanged: its own submap bounds it, 0.15 to 0.30 m at the
 end of the doubled path (r727 to r731).
+
+## Real-Recording Evaluation
+
+Roadmap item 25 is open-loop: a recorded vehicle does not respond to this
+stack. Results do not validate planning, control, braking, or flight safety.
+The data and reproducible commands are retained under
+`log/tools/vio/real-data/` with a `.keep` file. The data sources are subject to
+their own non-commercial licenses; neither dataset is included in this source.
+
+The EuRoC V1_01_easy record supplies 2,895 rectified pairs and 29,120 IMU
+samples. The raw Vicon marker pose is transformed to the IMU origin using its
+calibration, rather than treating the marker as the IMU. The VIO replay uses
+Vicon once to declare its initial position and heading, averages recorded IMU
+samples from 2 to 4 s at rest for tilt and gyro bias, and never feeds later
+Vicon poses into the filter. The x500 drag model and synthetic barometer are
+off; calibrated IMU noise and the dataset's shutter-aligned camera/IMU clock
+are used. It exercises the tracker and filter, not the live node's depth-map
+registration. Across 2,814 estimates and 58.43 m of reference path, final
+position error was 0.071 m, RMSE 0.175 m and p95 0.282 m; 2,808 estimates were
+healthy. The endpoint/path figure is about 0.12%, but this is a returning
+trajectory and is not directly equivalent to the simulator's first-pass drift.
+For the 2,808 healthy estimates, the full orientation difference against the
+calibrated raw Vicon orientation was 1.05 degrees median and 1.74 degrees at
+the 95th percentile. This inherits the reference's orientation and clock
+limitations; the angles are not depth errors.
+
+An independently initialized OpenVINS run used the same raw recording, its
+own online calibration and SLAM features. On 2,783 common frames, each
+trajectory was aligned once by initial position and yaw, without scale fit:
+the project replay's RMSE was 0.265 m and OpenVINS' was 0.213 m. The two
+initialization and calibration policies differ, so this is not a controlled
+algorithm ranking. Raw Vicon orientation and its clock have the dataset's
+documented limitations; OpenVINS is a separately built GPL reference tool,
+not a production dependency.
+
+The NTU VIRAL eee_03 replay fed the LIO core 1,794 original-timestamp Ouster
+scans and 70,456 VectorNav IMU samples after a sensor-observed rest interval.
+All scans carried the estimator's healthy flag, including the first scan,
+which initializes its map and is not a registration. The spinning scans span
+about 0.1 s and were treated as rigid at their original header stamps: no
+deskew or timestamp regularization was applied. Leica measured only the
+prism's position; the estimated full attitude rotates the calibrated 0.4 m
+body-to-prism lever arm for comparison. Of 1,794 scans, 1,502 associated with
+Leica over 127.76 m; 287 lay outside reference coverage and five fell across
+reference gaps over 0.1 s. A rigid SE(3) fit over all paired positions, with
+no scale fit, gives 0.097 m RMSE. Fitting only the first 20 s and evaluating
+the remaining 1,302 pairs gives 0.203 m RMSE. The full-fit figure is not a
+holdout error, and a healthy registration is not independent ground truth.
+

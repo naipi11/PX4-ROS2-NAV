@@ -336,6 +336,44 @@ miss is real evidence: a vision miss exists only along a ray that ended in a
 confident hit. Semantic understanding of what the shapes are — doors, glass,
 vegetation, vehicles — is a separate stage; this stage recovers geometry only.
 
+For real recordings the pair is first rectified from the measured intrinsics,
+distortion and camera-to-IMU mounts; depth and VIO then use the explicit common
+rectified projection. The simulated 6.4 m range and 0.45 px disparity-error
+assumption are not a real-camera guarantee. On six EuRoC V1_01_easy frames,
+64,754 surface returns from the actual ROS depth node were compared with the
+separate Leica scan after applying Vicon pose: 97.9% were within 0.25 m of a
+laser point. This is a one-sided nearest-point comparison, not visibility-
+matched depth accuracy or evidence for the braking contract.
+
+The complete open-loop memory replay published all 2,808 frames with healthy
+VIO poses and received 2,808 aligned scans and 2,808 memory statuses. Its
+final reconstructed snapshot contained 7,173 occupied voxels. Removing only
+the artificial map translation, without fitting alignment or scale, 57.4% of
+their centers lay within 0.25 m of the static laser cloud; the median nearest
+distance was 0.196 m and the 95th percentile 1.60 m. These distances include
+voxelization, VIO error, coverage differences and possible stereo mismatches;
+they are not a visibility-matched false-positive rate.
+
+As a diagnostic only, the same frames and VIO health mask were replayed with
+Vicon reference poses supplied at every frame instead of VIO poses. Of 7,351
+occupied voxels, 57.3% were within 0.25 m of the laser and the 95th percentile
+was 1.70 m. The similar aggregate suggests VIO drift alone does not explain
+the disagreement; the two voxel grids and occupied sets differ, and neither
+run establishes visibility or separates stereo error from laser coverage.
+Reference poses in this control were never sent to a flight controller.
+
+In a 100-frame VIO-pose replay into the actual obstacle memory, 721 occupied
+voxels were reconstructed from the final snapshot and cumulative delta; 98
+were farther than 0.5 m from the laser cloud. Every occupied voxel had a
+projected stereo return inside its 0.25 m cell. Laser coverage and occlusion
+were not independently labelled, so the disagreement is a real-data risk to
+investigate, not a measured false-positive rate or a safety certification.
+At 4.35 s, 56 of 13,397 stereo returns were both over 0.5 m from the nearest
+laser point and over 0.5 m behind a laser depth in a 3-by-3-pixel neighborhood.
+The captures were made at different times; pose error, laser sparsity and
+neighboring-pixel occlusion also affect this check. It identifies candidates
+for inspection, not individually confirmed false stereo hits.
+
 ### What Changes Above The Sensor Boundary
 
 Unknown space stays traversable without penalty; nothing in this stage may

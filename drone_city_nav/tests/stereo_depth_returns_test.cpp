@@ -58,6 +58,22 @@ TEST(StereoDepthReturns, APixelWithoutConfidentDepthYieldsNoReturn) {
   EXPECT_NEAR(returns[1].point.x, stereoConfidentDepthM(kGeometry, config), 1.0e-9);
 }
 
+TEST(StereoDepthReturns, OffCenterCalibrationSetsRayDirection) {
+  const StereoPairGeometry geometry{.focal_px = 100.0,
+                                    .principal_x_px = 20.0,
+                                    .principal_y_px = 10.0,
+                                    .baseline_m = 0.2};
+  StereoDepthReturnsConfig config;
+  config.pixel_stride = 1U;
+  const std::vector<std::int16_t> disparity{160};
+  const auto returns = stereoDepthReturns(disparity, 1U, 1U, geometry, config);
+  ASSERT_EQ(returns.size(), 1U);
+  EXPECT_TRUE(returns[0].hit);
+  EXPECT_NEAR(returns[0].point.x, 2.0, 1e-12);
+  EXPECT_NEAR(returns[0].point.y, 0.4, 1e-12);
+  EXPECT_NEAR(returns[0].point.z, 0.2, 1e-12);
+}
+
 TEST(StereoDepthReturns, TheStrideThinsTheReturns) {
   StereoDepthReturnsConfig config;
   config.pixel_stride = 4U;

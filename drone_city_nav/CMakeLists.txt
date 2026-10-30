@@ -1462,6 +1462,14 @@ if(BUILD_TESTING)
   target_link_libraries(visual_inertial_odometry_test drone_city_nav_localization)
   enable_project_warnings(visual_inertial_odometry_test)
 
+  ament_add_gtest(stereo_feature_tracker_test tests/stereo_feature_tracker_test.cpp
+                  src/stereo_feature_tracker.cpp)
+  target_compile_features(stereo_feature_tracker_test PRIVATE cxx_std_20)
+  target_include_directories(stereo_feature_tracker_test SYSTEM PRIVATE ${OpenCV_INCLUDE_DIRS})
+  target_include_directories(stereo_feature_tracker_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+  target_link_libraries(stereo_feature_tracker_test drone_city_nav_localization ${OpenCV_LIBS})
+  enable_project_warnings(stereo_feature_tracker_test)
+
   ament_add_gtest(transport_latency_ros_test tests/transport_latency_ros_test.cpp)
   target_compile_features(transport_latency_ros_test PRIVATE cxx_std_20)
   target_link_libraries(transport_latency_ros_test drone_city_nav_ros_adapters)

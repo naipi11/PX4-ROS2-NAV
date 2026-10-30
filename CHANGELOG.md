@@ -6,6 +6,22 @@ release names the asset tags it was validated with.
 
 ## Unreleased
 
+### Real-sensor evaluation
+
+- Configure rectified stereo focal length, principal point, baseline and
+  optical-to-body mount explicitly in the depth and VIO nodes. The simulated
+  pair's values and flight thresholds are unchanged. The images supplied to
+  these nodes must already be rectified to a common square-pixel projection.
+- Convert calibrated EuRoC stereo/IMU and raw Vicon poses to the offline VIO
+  record, and NTU VIRAL lidar/IMU and Leica prism positions to an offline LIO
+  record. Record sensor frames, timing, calibration and reference provenance;
+  never feed later reference poses into either estimator.
+- Compare EuRoC V1_01_easy with the separate OpenVINS estimator and raw Vicon;
+  exercise the ROS stereo-depth and obstacle-memory path on recorded images.
+  Compare NTU VIRAL eee_03 LIO with Leica prism positions, including a held-out
+  interval. The measurements and their open-loop limitations are in
+  [localization](docs/localization.md) and [camera perception](docs/camera_perception.md).
+
 ### Navigation clearance
 
 - Measure the contact-departure/approach law's body margin from conservative
