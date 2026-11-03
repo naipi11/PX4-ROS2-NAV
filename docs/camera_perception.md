@@ -39,6 +39,17 @@ the correction is recorded beside it.
   means without the separate 3D navigation lidar. The legacy
   `x500_lidar_3d` vehicle name and `LIDAR_PROFILE=3d` do not imply that sensor
   is mounted: runtime preparation removes it for stereo navigation.
+  Each ToF ray excludes the GUI-only vehicle marker visibility layer while
+  retaining every other layer, including collision proxies. In diagnostic
+  flight r3240 the forward ToF saw the yellow display arm as a 0.2–0.3 m
+  obstacle: 36 expanded rays in an airborne frame projected into the same
+  voxels that blocked the vehicle's footprint. After excluding the marker
+  layer, r3250's corresponding four zones returned no such hit; its downward
+  ToF still measured the staging floor (4,352 returns, 0.032 m height error
+  at p90 against sampled simulator truth). Both were bounded diagnostics;
+  r3250 used a dirty checkout and neither proves mission acceptance. Sensor
+  bags and flight records are kept under `log/tools/vio/depth_visibility_20261103/`
+  and `log/runs/r3240/` and `log/runs/r3250/`.
 - **Depth** (`stereo_depth_node`): semi-global matching, far field at full
   resolution over 64 disparities and near field at half resolution over 128,
   110 ms on two CPU threads. Disparity error 0.11 to 0.17 px at the median,

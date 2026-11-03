@@ -41,6 +41,15 @@ release names the asset tags it was validated with.
   the change. A separate 5,887-return smoke retained its previous filtering.
   These observations do not establish that the r3180 collision is resolved.
 
+### Simulated ToF visibility
+
+- Exclude the GUI-only vehicle marker layer from all six simulated ToF rays,
+  without hiding real scene geometry or collision proxies. In the r3240
+  diagnostic the front ToF mapped the vehicle's yellow display arm as an
+  obstacle; after the change, r3250 no longer saw that arm and its downward
+  ToF measured the real floor. These bounded diagnostics are not a flight
+  acceptance or a repair of the separate r3180 lidar collision.
+
 ### Navigation clearance
 
 - Measure the contact-departure/approach law's body margin from conservative
