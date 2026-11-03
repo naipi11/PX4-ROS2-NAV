@@ -356,6 +356,13 @@ public:
   // How many admissible connections the start has, for bounding that walk.
   [[nodiscard]] std::size_t departureConnectionCount(const Point3& start) const;
 
+  // Prefer a short raw-validated departure around an approaching clearance
+  // bottleneck. This is an optional improvement, never a reachability gate;
+  // if the deadline expires or no candidate works, retain the original path.
+  [[nodiscard]] std::optional<Point3>
+  saferDepartureWaypoint(const Point3& start, const Point3& rejoin,
+                         std::chrono::steady_clock::time_point deadline) const;
+
   struct GoalConnection3D {
     std::optional<PersistentPlannerNode3D> anchor;
     // The point the search ends at: the goal itself, or a free point within

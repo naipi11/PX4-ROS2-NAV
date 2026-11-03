@@ -6,6 +6,22 @@ release names the asset tags it was validated with.
 
 ## Unreleased
 
+### Clearance-aware departure shaping
+
+- When a newly planned departure approaches observed occupied evidence inside
+  the K27 height-error tube, try a short raw-validated waypoint before rejoining
+  the route. Compare each voxel with itself: a contact below the vehicle must
+  not hide an approach to a different obstacle above it. The original route
+  remains available when no safe improvement is found or the deadline ends;
+  collision validators, speed floors and braking limits are unchanged.
+- The host-valid lidar flight r3400 failed at 2.378 m/s, spending 19.5 s in a
+  slow room while its route remained planned. Its original local map and full
+  route during that interval were not retained. A different flight, r3460,
+  recorded a similar low-speed approach and its map; a deterministic regression
+  and a replay of that map exercise the waypoint change, but do not prove a
+  counterfactual r3400 flight. The dirty-checkout smoke r3470 completed without
+  contact at 2.827 m/s and 0.42 m true goal error; it is not acceptance.
+
 ### Three-dimensional turn limits
 
 - Bound curvature speed by the acceleration available in the turn's vertical

@@ -1,7 +1,9 @@
 #include "drone_city_nav/persistent_dstar_lite_planner_3d.hpp"
+#include "drone_city_nav/raw_occupancy_clearance_3d.hpp"
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstddef>
@@ -291,6 +293,81 @@ TEST(PersistentDStarLitePlanner3DTest, TheShortcutPassStopsAtTheDeadline) {
   EXPECT_EQ(applied, 0U);
   EXPECT_EQ(checks, 0U);
   EXPECT_EQ(factor_calls, 0U);
+}
+
+TEST(PersistentDStarLitePlanner3DTest,
+     AFeasibleDepartureAvoidsCrawlingIntoASeparateUpperObstacle) {
+  // The vehicle starts near a low obstacle but can first move horizontally
+  // away before ascending past another. A direct diagonal is physically
+  // clear, yet the 0.5 m height-error allowance makes it approach the upper
+  // obstacle with almost no body clearance and the live reference crawls.
+  const GridBounds3D bounds{50.0, -10.0, 2.0, 0.25, 36, 32, 26};
+  auto occupancy = std::make_shared<ObservedOccupancyGrid3D>(bounds);
+  auto upper = std::make_shared<ObservedOccupancyGrid3D>(bounds);
+  for (int z = 2; z <= 24; ++z) {
+    for (int y = 8; y <= 24; ++y) {
+      for (int x = 8; x <= 32; ++x) {
+        occupancy->setState({x, y, z}, ObservedVoxelState::kFree);
+      }
+    }
+  }
+  for (const GridIndex3D cell : {GridIndex3D{21, 13, 15},
+                                 {21, 14, 15},
+                                 {21, 15, 15},
+                                 {21, 16, 15},
+                                 {21, 14, 16}}) {
+    ASSERT_TRUE(occupancy->setState(cell, ObservedVoxelState::kOccupied));
+    ASSERT_TRUE(upper->setState(cell, ObservedVoxelState::kOccupied));
+  }
+  ASSERT_TRUE(occupancy->setState({24, 15, 7}, ObservedVoxelState::kOccupied));
+  PersistentPlannerConfig3D config = testConfig();
+  config.minimum_horizontal_step_m = 2.0;
+  config.minimum_vertical_step_m = 1.0;
+  config.time_model.maximum_horizontal_speed_mps = 6.5;
+  config.goal_tolerance_m = 0.1;
+  config.feasibility_first_enabled = true;
+  config.maximum_feasibility_compute_time_ms = 400.0;
+  config.maximum_feasibility_expansions_per_update = 100'000U;
+  config.feasibility_clearance_ranking_distance_m = 6.0;
+  config.clearance_ranking_weight = 1.5;
+  config.clearance_ranking_distance_m = 6.0;
+  config.physical_footprint = SweptFootprintConfig{};
+  config.tracking_error_tube.response_time_s = 0.075;
+  config.tracking_error_tube.minimum_progress_speed_mps = 3.0;
+  config.flight_envelope =
+      FlightEnvelopeConfig{.minimum_target_z_m = 2.0, .maximum_target_z_m = 8.5};
+  PersistentDStarLitePlanner3D planner{config};
+  auto flight =
+      request({55.464, -6.0185, 4.55959}, {53.2, -7.0, 8.0}, world(occupancy, 1U));
+  flight.velocity = {0.09, -0.1, 0.02};
+  PlannerUpdate3D update = planner.plan(flight);
+  for (int attempt = 0; attempt < 8 && !update.publishable(); ++attempt) {
+    update = planner.plan(flight);
+  }
+  ASSERT_TRUE(update.publishable());
+  const std::vector<Point3>& path = candidate(update).points;
+  EXPECT_TRUE(spatialRouteCandidateReachesGoal3D(candidate(update).source));
+  EXPECT_LE(distance3D(path.back(), flight.mission_goal), config.goal_tolerance_m);
+  expectRawValid(path, *occupancy, planner.config().physical_footprint);
+  const RawClearanceBody3D body{
+      .radius_m = 0.55, .lower_extent_m = 0.73, .upper_extent_m = 0.85};
+  double minimum_margin = 1.0;
+  for (std::size_t i = 1U; i < path.size(); ++i) {
+    const Point3 first = path[i - 1U];
+    const Point3 second = path[i];
+    const auto samples = std::max(
+        std::size_t{1U},
+        static_cast<std::size_t>(std::ceil(distance3D(first, second) / 0.025)));
+    for (std::size_t sample = 0U; sample <= samples; ++sample) {
+      const double t = static_cast<double>(sample) / static_cast<double>(samples);
+      const Point3 position{std::lerp(first.x, second.x, t),
+                            std::lerp(first.y, second.y, t),
+                            std::lerp(first.z, second.z, t)};
+      minimum_margin = std::min(minimum_margin,
+                                rawBodyInflationMargin3D(*upper, position, body, 1.0));
+    }
+  }
+  EXPECT_GE(minimum_margin, 0.075);
 }
 
 } // namespace

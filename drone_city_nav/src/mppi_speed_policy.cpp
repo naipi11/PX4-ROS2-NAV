@@ -3,6 +3,7 @@
 #include "drone_city_nav/flight_time_model_3d.hpp"
 #include "drone_city_nav/mppi/mppi_clearance_cost.hpp"
 #include "drone_city_nav/stopping_distance.hpp"
+#include "drone_city_nav/tracking_error_tube_config_3d.hpp"
 
 #include <algorithm>
 #include <array>
@@ -110,12 +111,6 @@ constexpr double kMotionDirectionSpeedThresholdMps{0.25};
   }
   return Vec3{};
 }
-
-// The speed a contact is left at: where the body's own clearance is nil the
-// tube law admits nothing, and a vehicle resting against evidence could not
-// leave it. 1 m/s is a 0.075 m tube at the measured response horizon, inside
-// the 0.16 m the 0.55 m body model keeps beyond the rotor tips (0.39 m).
-constexpr double kContactDepartureSpeedMps{1.0};
 
 // The tightest speed a set of constrained samples admits: the tube law at each
 // sample, and the stopping law for what the vehicle may carry on the way to

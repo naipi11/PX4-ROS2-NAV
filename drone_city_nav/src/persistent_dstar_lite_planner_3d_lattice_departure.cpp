@@ -1,10 +1,14 @@
 #include "drone_city_nav/occupied_collision_oracle_3d.hpp"
+#include "drone_city_nav/raw_occupancy_clearance_3d.hpp"
+#include "drone_city_nav/tracking_error_tube_config_3d.hpp"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <iterator>
+#include <limits>
 #include <optional>
 #include <ranges>
 #include <span>
@@ -14,6 +18,93 @@
 #include "persistent_dstar_lite_planner_3d_internal.hpp"
 
 namespace drone_city_nav::detail {
+namespace {
+
+// Signed, per-voxel body margin. Keeping the sign distinguishes moving
+// deeper into an existing contact from leaving it; comparing only the global
+// minimum can mistake a floor contact for permission to approach a ceiling.
+[[nodiscard]] double signedBodyMargin(const Point3& minimum, const Point3& maximum,
+                                      const Point3& box_minimum,
+                                      const Point3& box_maximum,
+                                      const RawClearanceBody3D& body) noexcept {
+  const double dx =
+      std::max({box_minimum.x - maximum.x, minimum.x - box_maximum.x, 0.0});
+  const double dy =
+      std::max({box_minimum.y - maximum.y, minimum.y - box_maximum.y, 0.0});
+  const double horizontal = std::hypot(dx, dy) - body.radius_m;
+  const double vertical = std::max(box_minimum.z - maximum.z - body.upper_extent_m,
+                                   minimum.z - body.lower_extent_m - box_maximum.z);
+  return std::max(horizontal, vertical);
+}
+
+// This is a soft path-shaping observation, not a collision rule. Each small
+// centre-line interval is enclosed by its box, so an approach can be reported
+// early but cannot be hidden by a diagonal sweep between sample points.
+template<typename Occupancy>
+[[nodiscard]] bool
+approachesTightEvidence(const Occupancy& occupancy, const Point3& first,
+                        const Point3& second, const RawClearanceBody3D& body,
+                        const double threshold_m, const double sweep_step_m) {
+  // Larger intervals still enclose the continuous sweep; the cap bounds work
+  // and can only make this optional shaping more conservative.
+  constexpr std::size_t kMaximumIntervals{64U};
+  const double requested_intervals =
+      std::ceil(distance3D(first, second) / sweep_step_m);
+  const auto intervals = static_cast<std::size_t>(
+      std::clamp(requested_intervals, 1.0, static_cast<double>(kMaximumIntervals)));
+
+  struct Interval {
+    Point3 minimum;
+    Point3 maximum;
+  };
+
+  std::array<Interval, kMaximumIntervals> sweeps{};
+  Point3 previous = first;
+  for (std::size_t i = 0U; i < intervals; ++i) {
+    const double fraction =
+        static_cast<double>(i + 1U) / static_cast<double>(intervals);
+    const Point3 next{std::lerp(first.x, second.x, fraction),
+                      std::lerp(first.y, second.y, fraction),
+                      std::lerp(first.z, second.z, fraction)};
+    sweeps[i] = {{std::min(previous.x, next.x), std::min(previous.y, next.y),
+                  std::min(previous.z, next.z)},
+                 {std::max(previous.x, next.x), std::max(previous.y, next.y),
+                  std::max(previous.z, next.z)}};
+    previous = next;
+  }
+  const Point3 minimum{std::min(first.x, second.x), std::min(first.y, second.y),
+                       std::min(first.z, second.z)};
+  const Point3 maximum{std::max(first.x, second.x), std::max(first.y, second.y),
+                       std::max(first.z, second.z)};
+  const Point3 center{0.5 * (minimum.x + maximum.x), 0.5 * (minimum.y + maximum.y),
+                      0.5 * (minimum.z + maximum.z)};
+  const double reach =
+      threshold_m + std::max({0.5 * (maximum.x - minimum.x) + body.radius_m,
+                              0.5 * (maximum.y - minimum.y) + body.radius_m,
+                              0.5 * (maximum.z - minimum.z) +
+                                  std::max(body.lower_extent_m, body.upper_extent_m)});
+  bool approaching{false};
+  forEachRawOccupiedVoxelNear3D(
+      occupancy, center, reach, nullptr,
+      [&](const Point3& box_minimum, const Point3& box_maximum) {
+        if (approaching) {
+          return;
+        }
+        const double start_margin =
+            signedBodyMargin(first, first, box_minimum, box_maximum, body);
+        for (std::size_t i = 0U; i < intervals; ++i) {
+          const double margin = signedBodyMargin(sweeps[i].minimum, sweeps[i].maximum,
+                                                 box_minimum, box_maximum, body);
+          if (margin < threshold_m && margin + 1.0e-6 < start_margin) {
+            approaching = true;
+            return;
+          }
+        }
+      });
+  return approaching;
+}
+
+} // namespace
 
 std::vector<PersistentPlannerNode3D>
 PlannerLattice3D::admissibleAnchors(const Point3& point, const bool start_anchor,
@@ -110,6 +201,108 @@ PlannerLattice3D::selectAnchor(const Point3& point, const bool start_anchor) con
 
 std::size_t PlannerLattice3D::departureConnectionCount(const Point3& start) const {
   return admissibleAnchors(start, true).size();
+}
+
+std::optional<Point3> PlannerLattice3D::saferDepartureWaypoint(
+    const Point3& start, const Point3& rejoin,
+    const std::chrono::steady_clock::time_point deadline) const {
+  if (!resident_collision_oracle_.has_value() ||
+      std::chrono::steady_clock::now() >= deadline ||
+      !(raw_bounds_.resolution_m > 0.0) ||
+      !(config_->physical_footprint.sweep_step_m > 0.0)) {
+    return std::nullopt;
+  }
+  const double threshold_m =
+      std::min(kContactDepartureSpeedMps,
+               config_->tracking_error_tube.minimum_progress_speed_mps) *
+      config_->tracking_error_tube.response_time_s;
+  if (!(threshold_m > 0.0)) {
+    return std::nullopt;
+  }
+  const double vertical_error_m =
+      std::ceil(kEstimateVerticalErrorM / raw_bounds_.resolution_m - 1.0e-9) *
+      raw_bounds_.resolution_m;
+  const SweptFootprintConfig& footprint = config_->physical_footprint;
+  const RawClearanceBody3D body{
+      .radius_m = footprint.body_radius_m,
+      .lower_extent_m = footprint.body_lower_extent_m + vertical_error_m,
+      .upper_extent_m = footprint.body_upper_extent_m + vertical_error_m};
+  const OccupiedCollisionWorld3D& world = resident_collision_oracle_->world();
+  const auto approaches = [&](const Point3& first, const Point3& second) {
+    if (world.observed_occupancy != nullptr) {
+      return approachesTightEvidence(*world.observed_occupancy, first, second, body,
+                                     threshold_m, footprint.sweep_step_m);
+    }
+    if (world.static_occupancy != nullptr) {
+      return approachesTightEvidence(*world.static_occupancy, first, second, body,
+                                     threshold_m, footprint.sweep_step_m);
+    }
+    return false;
+  };
+  if (!approaches(start, rejoin)) {
+    return std::nullopt;
+  }
+  // A bounded local search: only candidates supported by the same raw
+  // evidence and body validators can replace the original first segment.
+  // Half and full steps fit a dogleg inside the coarse lattice spacing.
+  const double maximum_step_m =
+      std::clamp(0.5 * config_->minimum_horizontal_step_m, 0.25, 1.0);
+  std::optional<Point3> best;
+  double best_time_s = std::numeric_limits<double>::infinity();
+  for (const double step_m : {0.5 * maximum_step_m, maximum_step_m}) {
+    for (int z = -1; z <= 1; ++z) {
+      for (int y = -1; y <= 1; ++y) {
+        for (int x = -1; x <= 1; ++x) {
+          if (x == 0 && y == 0 && z == 0) {
+            continue;
+          }
+          if (std::chrono::steady_clock::now() >= deadline) {
+            return best;
+          }
+          const double scale =
+              step_m / std::sqrt(static_cast<double>(x * x + y * y + z * z));
+          const Point3 waypoint{start.x + x * scale, start.y + y * scale,
+                                start.z + z * scale};
+          const Vec3 departure{waypoint.x - start.x, waypoint.y - start.y,
+                               waypoint.z - start.z};
+          const Vec3 return_to_route{rejoin.x - waypoint.x, rejoin.y - waypoint.y,
+                                     rejoin.z - waypoint.z};
+          const Vec3 original_direction{rejoin.x - start.x, rejoin.y - start.y,
+                                        rejoin.z - start.z};
+          if (!(distance3D(waypoint, rejoin) > 1.0e-6)) {
+            continue;
+          }
+          // A necessary stop-and-turn is still allowed; rank its physical
+          // delay so a continuous departure wins when it is just as safe.
+          const double departure_turn_s =
+              requiresFlightStopAndTurn3D(departure, return_to_route,
+                                          config_->minimum_continuous_turn_alignment)
+                  ? estimatedFlightStopAndTurnDelay3D(departure, return_to_route,
+                                                      config_->time_model)
+                  : 0.0;
+          const double rejoin_turn_s =
+              requiresFlightStopAndTurn3D(return_to_route, original_direction,
+                                          config_->minimum_continuous_turn_alignment)
+                  ? estimatedFlightStopAndTurnDelay3D(
+                        return_to_route, original_direction, config_->time_model)
+                  : 0.0;
+          const double time_s =
+              (distance3D(start, waypoint) + distance3D(waypoint, rejoin)) /
+                  config_->time_model.maximum_horizontal_speed_mps +
+              departure_turn_s + rejoin_turn_s;
+          if (!(time_s < best_time_s) || !pointInsideFlightEnvelope(waypoint) ||
+              approaches(start, waypoint) || approaches(waypoint, rejoin) ||
+              !departureSegmentValid(start, waypoint) ||
+              !routePiecesValid(waypoint, rejoin)) {
+            continue;
+          }
+          best = waypoint;
+          best_time_s = time_s;
+        }
+      }
+    }
+  }
+  return best;
 }
 
 PlannerLattice3D::DepartureConnection3D PlannerLattice3D::selectDepartureConnection(

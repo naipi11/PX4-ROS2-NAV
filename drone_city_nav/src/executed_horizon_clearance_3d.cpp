@@ -1,6 +1,7 @@
 #include "drone_city_nav/executed_horizon_clearance_3d.hpp"
 
 #include "drone_city_nav/raw_occupancy_clearance_3d.hpp"
+#include "drone_city_nav/tracking_error_tube_config_3d.hpp"
 #include "drone_city_nav/world_snapshot_3d.hpp"
 
 #include <algorithm>
@@ -21,13 +22,6 @@ namespace {
   return std::hypot(std::hypot(second.x - first.x, second.y - first.y),
                     second.z - first.z);
 }
-
-// The estimate's vertical error the body's clearance is measured with
-// (specification K27): the camera estimator's height runs 0.3 to 0.6 m from
-// the truth, 0.57 m by the end of an ordinary flight (r1183), 0.5 m after
-// 2.8 s of dead reckoning (r1184), and a horizon that kept 0.3 m above a
-// floor by the estimate put the feet on it (r1184).
-constexpr double kEstimateVerticalErrorM{0.5};
 
 // Compare geometric margins, not ESDF lower bounds: the latter change with the
 // query's position inside a voxel even during motion parallel to a flat wall.

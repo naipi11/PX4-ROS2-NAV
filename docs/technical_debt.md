@@ -219,6 +219,23 @@ and this correction does not close the planner/exploration debt or retroactively
 pass the rejected series. Reproduction, aligned timing, and the attribution
 limits are retained in `log/tools/diagnostics/navigation-speed-20261029/`.
 
+On 2026-11-03 the host-valid r3400 lidar flight failed the 2.4 m/s requirement
+at 2.378 m/s. It spent 19.5 s in the shaft room while still planned, with
+clearance and route-clearance limits dominating. Its original full route and
+local raw observations for the slow interval were not retained, so the exact
+cause and a counterfactual repair cannot be replayed. The separate r3460
+diagnostic captured a similar low-speed interval: its recorded route approached
+an upper occupied voxel through the K27 vertical-error allowance, while its
+current zero margin came from a different lower voxel. A global minimum cannot
+therefore justify dropping the approach limit. On the recorded r3460 map a short
+horizontal departure before climbing clears the upper voxel; the planner now
+tries such an optional, individually raw-validated waypoint and keeps the
+original route if no improvement fits. Smoothing can still reduce its clearance,
+and other routes can still be slow. Neither this replay nor the r3470
+dirty-checkout smoke resolves the r3400 attribution gap or passes its rejected
+series. Raw bags, map and replay sources are kept with `log/runs/r3460/` on the
+simulation workstation.
+
 ## Camera Perception
 
 | Debt | Measured | Class | Found by |

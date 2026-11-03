@@ -774,8 +774,43 @@ std::vector<Point3> PersistentDStarLitePlanner3DImpl::refinePublishedPath(
     std::vector<Point3> path, const PersistentPlannerRequest3D& request,
     const std::chrono::steady_clock::time_point deadline,
     PlannerTelemetry3D& telemetry) const {
+  const auto improve_departure = [this, &deadline,
+                                  &telemetry](std::vector<Point3> route) {
+    // Existing refined or hull-fallback departures carry a distinct contact
+    // contract and must not be rewritten by this optional shaping pass.
+    if (route.size() < 2U || telemetry.departure_waypoint_count != 0U ||
+        telemetry.departure_hull_fallback) {
+      return route;
+    }
+    const Point3 first = route.front();
+    const Point3 second = route[1U];
+    const double length_m = distance3D(first, second);
+    if (!(length_m > 1.0e-6)) {
+      return route;
+    }
+    // One lattice step, capped at 2 m, keeps the raw-evidence search local.
+    const double preview_m = std::clamp(config_.minimum_horizontal_step_m, 0.5, 2.0);
+    const double fraction = std::min(1.0, preview_m / length_m);
+    const Point3 rejoin{std::lerp(first.x, second.x, fraction),
+                        std::lerp(first.y, second.y, fraction),
+                        std::lerp(first.z, second.z, fraction)};
+    if (fraction < 1.0 && !lattice_.routePiecesValid(rejoin, second)) {
+      return route;
+    }
+    const std::optional<Point3> waypoint =
+        lattice_.saferDepartureWaypoint(first, rejoin, deadline);
+    if (!waypoint.has_value()) {
+      return route;
+    }
+    route.reserve(route.size() + (fraction < 1.0 ? 2U : 1U));
+    route.insert(route.begin() + 1, *waypoint);
+    if (fraction < 1.0) {
+      route.insert(route.begin() + 2, rejoin);
+    }
+    return route;
+  };
   if (path.size() < 3U) {
-    return path;
+    return improve_departure(std::move(path));
   }
   // Validated as the path is accepted: a shortcut clear only when swept whole
   // would be refused by the acceptance and the candidate lost with it.
@@ -806,9 +841,9 @@ std::vector<Point3> PersistentDStarLitePlanner3DImpl::refinePublishedPath(
   if (config_.clearance_centering_passes == 0U ||
       config_.maximum_clearance_centering_queries == 0U ||
       !(config_.clearance_ranking_distance_m > 0.0)) {
-    return path;
+    return improve_departure(std::move(path));
   }
-  return path_postprocessor_.centerOnClearance(
+  path = path_postprocessor_.centerOnClearance(
       path,
       PathClearanceCenteringContext3D{
           .segment_valid = segment_valid,
@@ -823,6 +858,7 @@ std::vector<Point3> PersistentDStarLitePlanner3DImpl::refinePublishedPath(
           .deadline = deadline,
       },
       telemetry.clearance_centering_queries, telemetry.clearance_centering_moves);
+  return improve_departure(std::move(path));
 }
 
 std::optional<SpatialRouteCandidate3D> PersistentDStarLitePlanner3DImpl::makeCandidate(

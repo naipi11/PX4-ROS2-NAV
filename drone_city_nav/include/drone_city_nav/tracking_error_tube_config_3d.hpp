@@ -2,6 +2,11 @@
 
 namespace drone_city_nav {
 
+// K27's vertical-estimate error allowance, rounded to whole raw grid cells.
+inline constexpr double kEstimateVerticalErrorM{0.5};
+// K18: a contact is left at this speed, never approached at the floor.
+inline constexpr double kContactDepartureSpeedMps{1.0};
+
 // Bounds the translational tracking error accumulated during the closed-loop
 // response horizon. The tube collapses with commanded speed instead of
 // inflating the hard planning footprint by a fixed margin. It is one law read
