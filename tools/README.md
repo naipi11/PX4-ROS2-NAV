@@ -135,6 +135,59 @@ the evaluation host in `log/tools/vio/real-data/.keep`; the datasets are not
 part of the source tree. Both replays are open-loop and cannot prove flight
 safety, camera braking range, or real-time performance.
 
+## Measuring Stereo Visibility (`stereo/`)
+
+These tools replay recorded images through `stereo_depth_node`; reference
+depth is used only after the ROS node publishes. They do not run a flight or
+establish a real-airframe safety guarantee.
+
+- `prepare_middlebury.py` converts one official Middlebury Eval3 scene. Its
+  PFM payload is already in disparity pixels: the official SDK uses the scale
+  sign for byte order and does not multiply the values. Mask 0 is unknown,
+  128 occluded, 255 nonoccluded. The right image is shifted without wrapping
+  to align principal points; residual vertical rectification error is retained.
+- `prepare_rgbnir.py` rectifies a recorded RGB-NIR pair, transforms the
+  synchronized lidar into the left camera frame, and associates only points
+  within 0.5 pixel per axis of a stereo sample. Missing lidar coverage is
+  unknown; mutual stereo visibility of the sparse points is not assumed. The
+  image-to-scan timestamp limit is explicit and does not deskew a lidar sweep.
+- `replay_depth.py` runs the actual node with the prepared images and its
+  explicit calibration. By default it restarts the node for each frame, so
+  sparsely sampled records are not mistaken for continuous dark exposure.
+  `--continuous` preserves history only for an actual continuous recording.
+  A relaxed `--allowed-depth-error-m` is measurement-only and must not be
+  used as a navigation guarantee.
+- `evaluate_visibility.py` reports reference classes and sampled pixels
+  separately, including hit and free-ray overreach. `calibrate_visibility.py`
+  fits the worst calibration-recording p99 and reports held-out recording
+  exceedances and missing observations; physical locations may overlap and
+  the result is conditional, not a statistical bound. `build_braking_probe.sh`
+  builds a probe of the existing C++ stopping contract using simulated x500
+  parameters only.
+
+For the retained RGB-NIR recordings, run inside the project container:
+
+```bash
+BASE=/workspace/log/tools/vio/depth_visibility_20261103
+# h5py is an evaluation-only dependency; use the retained pinned wheel or
+# install h5py 3.11.0 into a separate directory, not the production image.
+export PYTHONPATH="$BASE/pydeps:/usr/lib/python3/dist-packages${PYTHONPATH:+:$PYTHONPATH}"
+source install/setup.bash
+python3 tools/stereo/prepare_rgbnir.py --scene-dir "$BASE/raw/01-27-21-26-23" \
+  --output-dir "$BASE/repro/prepared" --max-lag-ms 20
+python3 tools/stereo/replay_depth.py --input-dir "$BASE/repro/prepared" \
+  --output-dir "$BASE/repro/replayed" --timeout-s 120
+python3 tools/stereo/evaluate_visibility.py --input "$BASE/repro/replayed/21_26_20_089.npz" \
+  --output "$BASE/repro/frame_report.json"
+```
+
+The evidence is retained under `log/tools/vio/depth_visibility_20261103/.keep`,
+including the scene split and original input checksums. Middlebury grants use
+and publication of its images and disparity maps with citation; the RGB-NIR
+dataset card did not specify a license when inspected, so no redistribution or
+commercial-use permission is inferred. The benchmark's static scenes do not
+demonstrate moving-platform synchronization.
+
 One-off diagnostics written for a single investigation stay in
 `log/tools/diagnostics/` and are not tracked; the goal journals in
 `log/tools/journal/` say which was used for what.

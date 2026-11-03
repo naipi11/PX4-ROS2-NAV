@@ -1231,6 +1231,14 @@ preserves the original lidar and IMU header stamps and exports Leica positions
 separately. Its first LIO replay treats each spinning scan as rigid; it does not
 deskew or pretend Leica supplied orientation.
 
+The next real-perception measurement (2026-11-03) adds synchronized RGB-NIR
+stereo/lidar frames and Middlebury's independent nonocclusion masks. It found
+measured free-ray overreach on a real stereo benchmark and did not produce an
+accepted real-camera braking range. The data, visibility restrictions,
+held-out result and the unchanged simulation contract are in
+[`camera_perception.md`](camera_perception.md); the unresolved sensor-confidence
+problem is recorded in [`technical_debt.md`](technical_debt.md).
+
 The first step is measured, not a general real-world acceptance: more
 recordings, sensor-specific timing and distortion, long-lived mapping and
 the limits of the one-sided memory comparison remain to be examined. Neither

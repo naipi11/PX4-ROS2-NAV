@@ -374,6 +374,73 @@ The captures were made at different times; pose error, laser sparsity and
 neighboring-pixel occlusion also affect this check. It identifies candidates
 for inspection, not individually confirmed false stereo hits.
 
+#### Visibility-Matched Real-Data Assessment
+
+On 2026-11-03 the production depth node was replayed on ten public
+[Middlebury Eval3](https://vision.middlebury.edu/stereo/submit3/) 2014 indoor
+scenes. Its own SDK reads the PFM float payload directly in pixel disparity
+units, and defines mask values 0 unknown, 128 occluded and 255 nonoccluded.
+The left/right principal-point difference is removed by shifting the right
+image without wrapping. The depth reference is `f * baseline / (d + doffs)`;
+the images and calibration used by the node were verified unchanged when the
+independent reference was corrected. Middlebury is a static benchmark, not a
+synchronized moving-camera recording. The scenes' recorded residual vertical
+disparities are retained beside each result.
+
+On the perfectly rectified `PlaytableP` scene, 65,205 sampled pixels had
+nonoccluded reference depth. The node emitted 39,739 surface hits and 1,064
+free-only rays at those pixels. All 1,064 free endpoints extended more than
+0.25 m behind the reference surface; one referenced surface at 2.04 m was
+reported free to 11.18 m. With the confidence gate relaxed for measurement
+only, the same pixels had 125.1 px median absolute disparity error; all 1,064
+reference disparities were within the configured 256-pixel search range.
+The near matcher had no valid alternative at 1,063 of those pixels. An
+independent reverse-SGBM check with a one-pixel threshold still passed 708 of
+the 1,064 and rejected 5,310 of 36,434 otherwise accurate hits on this scene.
+Neither a simple reciprocal check nor a single empirical error percentile is
+therefore a demonstrated safety fix. The original results that incorrectly
+scaled the PFM values or treated mask value 128 as nonoccluded are retained
+only as superseded investigation artifacts.
+
+The separate [pixel-aligned RGB-NIR stereo and lidar dataset](https://huggingface.co/datasets/DivisonOfficer/Pixel-aligned_RGB-NIR_stereo_dataset)
+provides synchronized moving-platform records. Four recordings supplied 90 frames
+whose image and lidar scan stamps differed by at most 20 ms. The 1440 x 1080
+NIR images were rectified using their supplied stereo calibration; the lidar
+was transformed with each archive's camera-to-lidar extrinsic. Lidar points
+were associated only within 0.5 pixel on each axis of a sampled stereo pixel.
+Individual lidar point times and motion deskew were unavailable. Sparse lidar
+does not establish mutual stereo visibility. Of 8,748,000 sampled pixels,
+46,779 had a sparse in-right-view lidar reference; the rest must not be scored
+as free.
+Each selected image was evaluated with a fresh node: this measures frame
+output, not the temporal blindness behavior K14. No time-of-flight input was
+replayed. Thirteen of 38 dark-indoor frames and all 34 complex-indoor holdout
+frames emitted no stereo hit or free ray because the node's blind gate removed
+its matches; the real camera's exposure/gain is not calibrated to K15.
+
+For a conditional disparity-error experiment, one dark-indoor and one daylight
+recording were used for fitting, and separate complex-indoor and daylight
+recordings were held out. They are different sequences, but their physical
+locations were not independently verified as disjoint. The fit takes the
+larger per-recording p99 absolute disparity error among lidar-associated hits:
+**45.39 px**. The confidence gate was relaxed in that measurement-only pass to
+avoid censoring distant hits; its outputs were never used for navigation. In
+the daylight holdout, 34 of 2,139 associated hits exceeded the fitted value;
+the complex-indoor holdout produced no hits, so its error distribution is
+unmeasurable. Samples are correlated, and lidar visibility is unverified: the
+p99 is not a bound.
+
+For this recording's rectified `f = 1867.56 px`, `baseline = 0.13213 m`, and
+0.25 m depth tolerance, the node's linearized formula gives 1.166 m from that
+conditional error; the exact two-sided disparity expression gives 1.047 m.
+Both are below the simulation's 2.0 m physical margin. The existing stopping
+contract therefore rejects them as invalid, not as a safe forward speed. They
+are not a calibrated real-camera detection range. No simulation setting or
+specification entry was changed. Real use still needs visibility-labelled
+coverage and timing on the intended sensor, plus independently measured
+airframe stopping and end-to-end evidence age.
+
+
 ### What Changes Above The Sensor Boundary
 
 Unknown space stays traversable without penalty; nothing in this stage may

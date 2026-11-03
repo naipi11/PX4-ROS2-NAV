@@ -8,6 +8,14 @@ release names the asset tags it was validated with.
 
 ### Real-sensor evaluation
 
+- Evaluate the production stereo-depth node on four synchronized RGB-NIR and
+  lidar recordings and ten Middlebury scenes with nonocclusion masks. Keep
+  missing reference, occluded regions and unmatched stereo pixels separate;
+  measure both surface and free-ray overreach.
+- Add a recording-separated disparity-error fit and holdout report, and an
+  offline probe of the existing stopping contract. The empirical fit did not
+  establish a real-camera braking guarantee; simulator settings are unchanged.
+
 - Configure rectified stereo focal length, principal point, baseline and
   optical-to-body mount explicitly in the depth and VIO nodes. The simulated
   pair's values and flight thresholds are unchanged. The images supplied to
