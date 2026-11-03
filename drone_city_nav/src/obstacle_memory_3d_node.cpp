@@ -286,8 +286,8 @@ public:
         translation.at(0), translation.at(1), translation.at(2)};
     projection_config_.lidar_flu_to_body_frd_quaternion = {
         rotation.at(0), rotation.at(1), rotation.at(2), rotation.at(3)};
-    self_filter_config_.horizontal_radius_m =
-        declare_parameter<double>("lidar_self_filter_radius_m", 0.9);
+    self_filter_config_.horizontal_radius_m = declare_parameter<double>(
+        "lidar_self_filter_radius_m", LidarSelfFilterConfig{}.horizontal_radius_m);
     self_filter_config_.upward_extent_m =
         declare_parameter<double>("lidar_self_filter_upward_extent_m", 0.5);
     self_filter_config_.downward_extent_m =

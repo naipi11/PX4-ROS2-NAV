@@ -40,6 +40,24 @@ alignment, sparse Occupancy3D bounds and chunk size, hit/miss integration,
 snapshot/delta cadence, self-return filtering, and selected-spectator
 current/accumulated point clouds.
 
+The self-return cylinder is configured in the acquisition body frame by
+`lidar_self_filter_radius_m`, `lidar_self_filter_upward_extent_m`, and
+`lidar_self_filter_downward_extent_m`. Its default horizontal radius is 0.40 m
+for the simulated x500: the rotor collision geometry reaches about 0.386 m
+from `base_link`. The vertical extents remain 0.50 m in each direction. A hit
+inside the cylinder is discarded from both the current obstacle scan and
+memory; a hit outside it whose voxel centre is inside is retained in the
+current scan but excluded from persistent memory. The cylinder still hides
+anything inside it. Set these parameters from the measured self geometry of
+any other airframe; this simulation-specific margin is not a real-aircraft
+calibration.
+
+In diagnostic flight r3200, 16 recorded returns at 0.887–0.899 m radius
+coincided with a static wall and were discarded by the former 0.90 m radius.
+On a separate recorded scan, all 5,887 close returns filtered by the old
+radius also fit within 0.40 m. This limited comparison does not prove that
+every self return is covered, or that the separate r3180 collision is fixed.
+
 Beam-adjacent surface reconstruction (`lidar_surface_interpolation_enabled`,
 `lidar_surface_interpolation_maximum_incidence_deg`,
 `lidar_surface_interpolation_maximum_row_incidence_deg`): two adjacent returns

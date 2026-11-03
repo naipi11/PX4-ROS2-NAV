@@ -8,7 +8,10 @@
 namespace drone_city_nav {
 
 struct LidarSelfFilterConfig {
-  double horizontal_radius_m{0.9};
+  // The x500 rotor tips reach about 0.386 m from base_link. Keep a small
+  // sensor-noise margin while reducing the blind zone outside the airframe.
+  // Other airframes must configure this radius for their own geometry.
+  double horizontal_radius_m{0.4};
   double upward_extent_m{0.5};
   double downward_extent_m{0.5};
 };

@@ -30,6 +30,17 @@ release names the asset tags it was validated with.
   interval. The measurements and their open-loop limitations are in
   [localization](docs/localization.md) and [camera perception](docs/camera_perception.md).
 
+### Lidar self-return filtering
+
+- Reduce the simulated x500's default horizontal self-filter radius from
+  0.90 m to 0.40 m, enclosing its approximately 0.386 m rotor reach while
+  retaining configurable dimensions for other airframes. The vertical
+  limits are unchanged. The ROS node and the filter share the same default.
+- A recorded r3200 scan supplied 16 wall returns outside the airframe that
+  the old filter discarded; the measured-return regression failed before
+  the change. A separate 5,887-return smoke retained its previous filtering.
+  These observations do not establish that the r3180 collision is resolved.
+
 ### Navigation clearance
 
 - Measure the contact-departure/approach law's body margin from conservative
