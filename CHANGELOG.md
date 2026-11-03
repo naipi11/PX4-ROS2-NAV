@@ -6,6 +6,23 @@ release names the asset tags it was validated with.
 
 ## Unreleased
 
+### Exhausted partial-route recovery
+
+- If an extension's required stitch is beyond the end of a partial certified
+  route, finish that extension and replan from the vehicle instead of retrying
+  the impossible stitch. A replacement may be admitted for that exhausted
+  partial route when no eligible successor is pending; normal collision,
+  trajectory, handoff, generation and objective checks still apply.
+- Host-valid camera flight r3510 spent about 98 s at a partial-route end while
+  63 extension attempts requested a stitch 8 m past the certified end. Its
+  600 s mission did not complete; it also flew about 990 m, so fixing that
+  stall alone does not establish that the mission would have succeeded.
+  An end-to-end regression exercises the extension failure, fresh search and
+  certified pending successor while retaining the incumbent execution.
+  The dirty-checkout camera smoke r3530 completed without contact at 1.917 m/s
+  and 0.80 m true goal error; it did not encounter the failed stitch and is
+  not an acceptance flight.
+
 ### Clearance-aware departure shaping
 
 - When a newly planned departure approaches observed occupied evidence inside

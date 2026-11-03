@@ -278,4 +278,12 @@ removed (roadmap item 15 waits for them); the cave and the finals locations
 are imported and load but have not been flown; the point-to-point mission has
 been flown from one start to one goal. Where each lands: the cooperative flights are item 15's, on the lidar profile by its decision, so the camera defaults for several vehicles stay unflown; the cave and the finals locations are flown by item 11's survey acquisition; item 19 flew the mission back and to a goal outside the location (r721 to r731), the first flights in another direction and with another goal; other starts and goals stay unflown.
 
+The camera flight r3510 did not complete its mission in 600 s. Its 63 retries
+of a stitch beyond a partial route's end explain a 98 s low-speed episode, and
+the exhausted-route recovery has a deterministic worker-to-certification
+regression. The flight also travelled about 990 m, and the main sensor bag
+ended at 550 s; the change has not established why the rest of the journey
+failed or what that flight would have done with the fix. Its failure remains
+in the interrupted series; a later passing flight cannot replace it.
+
 The chain a blinded vehicle takes was flown in roadmap item 17: the estimator declares dead reckoning and then silence, the offboard descends level, and the vehicle lands whole (r939 to r943); under a failing light it comes home (r944 to r948). Not flown: the lidar vehicle's return from a goal outside the location (the proof's entry under Planning), a failure injected on the pad, a hold on dead reckoning within a metre of a wall, smoke (item 18) and moving obstacles (item 21).

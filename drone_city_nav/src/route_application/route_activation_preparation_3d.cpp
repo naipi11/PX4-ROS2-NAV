@@ -628,15 +628,6 @@ assessReplacement(RouteActivationPreparationState3D state,
       sameExecutionRouteBase3D(state.prepared.execution_base, current_execution);
   const ActivatedRouteIdentity3D* const active_identity =
       current_route != nullptr ? std::addressof(current_route->identity) : nullptr;
-  // A resident route released as blocked or diverged is one the vehicle
-  // cannot follow any more, and one released as stalled is one it has stood
-  // on instead of flying: neither is a base a successor has to improve on,
-  // so the first raw-valid successor replaces it.
-  const bool safety_replan_requested =
-      transaction.replacement() &&
-      (transaction.release_reason == RouteReleaseReason3D::kBlocked ||
-       transaction.release_reason == RouteReleaseReason3D::kDiverged ||
-       transaction.release_reason == RouteReleaseReason3D::kStalled);
   state.overlap_search =
       candidate.provenance.required_splice_base_route_instance_id.valid();
   const PendingCertifiedRoute3D* const captured_pending =
@@ -645,6 +636,21 @@ assessReplacement(RouteActivationPreparationState3D state,
                                               *current_execution)
           ? snapshot.pending_route.get()
           : nullptr;
+  // Blocked, diverged and stalled routes cannot be followed. A partial route
+  // whose certified end cannot support the required stitch is likewise not a
+  // useful equivalent segment, but only if no certified successor is already
+  // pending. Route and current-state handoff certification still apply.
+  const bool exhausted_partial_without_successor =
+      transaction.release_reason == RouteReleaseReason3D::kExhausted &&
+      current_route != nullptr &&
+      !current_route->identity.proposal.reaches_mission_goal &&
+      captured_pending == nullptr;
+  const bool safety_replan_requested =
+      transaction.replacement() &&
+      (transaction.release_reason == RouteReleaseReason3D::kBlocked ||
+       transaction.release_reason == RouteReleaseReason3D::kDiverged ||
+       transaction.release_reason == RouteReleaseReason3D::kStalled ||
+       exhausted_partial_without_successor);
   const CertifiedRouteSuffix3D* const improvement_resident =
       captured_pending != nullptr ? std::addressof(captured_pending->route)
                                   : current_route;

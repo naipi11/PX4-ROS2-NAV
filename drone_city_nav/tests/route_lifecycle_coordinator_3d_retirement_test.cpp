@@ -1,3 +1,7 @@
+#include <chrono>
+#include <condition_variable>
+#include <mutex>
+
 #include "route_lifecycle_coordinator_3d_test_support.hpp"
 
 namespace drone_city_nav {
@@ -595,6 +599,191 @@ TEST(RouteLifecycleCoordinator3DRetirementTest,
   });
 
   EXPECT_FALSE(update.incumbent_rejected);
+}
+
+TEST(RouteLifecycleCoordinator3DRetirementTest,
+     AnExtensionBeyondAPartialRouteReplansFromTheVehicle) {
+  // At the end of a partial route, adding the required overlap gives a stitch
+  // beyond the certified route. Retrying the same extension cannot move the
+  // vehicle; the old owner must remain while a fresh route is searched.
+  ExecutionSupervisor3D supervisor;
+  LifecycleFixture3D input = fixture();
+  SnapshotFixture3D partial;
+  partial.objective = input.transaction->objective;
+  partial.proposal.objective = partial.objective;
+  partial.proposal.intent.mission_target = partial.objective.goal;
+  partial.proposal.intent.id = makeRouteIntentId3D(
+      partial.objective.goal, partial.objective.mission_epoch,
+      partial.objective.assignment_generation, partial.objective.target_detection_id,
+      partial.objective.target_track_id);
+  partial.proposal.reaches_mission_goal = false;
+  partial.proposal.evidence.reaches_mission_target = false;
+  partial.route.back().reference_speed_mps = 4.0;
+  partial.physical_route_fingerprint = routeFingerprint(partial.route);
+  partial.proposal.route_fingerprint = partial.physical_route_fingerprint;
+  partial.geometry = makeGeometry(
+      partial.route, partial.physical_route_fingerprint,
+      TrackingErrorTubeWorld3D{
+          .observed_occupancy = &partial.raw_occupancy,
+          .occupied_content_fingerprint =
+              partial.raw_occupancy.occupiedSnapshot().contentFingerprint(),
+      });
+  partial.decorations =
+      makeDecorations(partial.geometry, SnapshotFixture3D::kRouteGeneration);
+  const std::optional<CertifiedRouteSuffix3D> certified = partial.certify();
+  ASSERT_TRUE(certified.has_value());
+  const auto& certified_route =
+      certified.value(); // NOLINT(bugprone-unchecked-optional-access)
+  const auto authority = supervisor.authority();
+  ASSERT_NE(authority, nullptr);
+  const auto original = authority->plan();
+  ASSERT_NE(original, nullptr);
+  const ExecutionRouteTransitionResult3D transition = activateCertifiedRoute3D(
+      *original, original->version, certified_route,
+      SnapshotFixture3D::finitePlanForRoute(*original, certified_route,
+                                            FiniteExecutionKind3D::kNominal, 100U));
+  ASSERT_TRUE(transition.applied());
+  ASSERT_NE(transition.next, nullptr);
+  ASSERT_TRUE(commitExecutionHorizonForTest(
+                  supervisor,
+                  ExecutionHorizonTestTransaction3D{
+                      .kind = ExecutionHorizonCommitKind3D::kTransition,
+                      .expected_authority = authority,
+                      .expected_plan = original,
+                      .transition = transition,
+                      .expected_pending = nullptr,
+                      .owner = SnapshotFixture3D::committedOwner(*transition.next),
+                      .input = SnapshotFixture3D::committedInput(*transition.next),
+                  })
+                  .committed());
+  const auto resident = supervisor.plan();
+  ASSERT_NE(resident, nullptr);
+  ASSERT_NE(resident->route(), nullptr);
+  const auto route =
+      std::shared_ptr<const CertifiedRouteSuffix3D>{resident, resident->route()};
+  ASSERT_FALSE(route->identity.proposal.reaches_mission_goal);
+  const double end_station = route->endStationM();
+  input.navigation.state.x = 10.0F;
+  input.navigation.state.y = 0.0F;
+  input.navigation.state.z = 5.0F;
+  const RouteProgressProjection3D projection{.valid = true,
+                                             .station_m = end_station,
+                                             .total_length_m = end_station,
+                                             .remaining_m = 0.0};
+
+  std::size_t commits{0U};
+  auto config = lifecycleConfig(input, supervisor, commits);
+  bindResidentReplanSnapshot(config, input, supervisor, 600);
+  std::mutex mutex;
+  std::condition_variable changed;
+  std::optional<RouteLifecycleReplanOutcome3D> replan;
+  std::optional<RouteLifecycleUpdate3D> failed_extension;
+  std::optional<RouteLifecycleUpdate3D> replacement;
+  std::optional<RoutePlanningRejection3D> rejection;
+  config.replan_outcome_handler = [&](const RouteLifecycleReplanOutcome3D& outcome) {
+    const std::scoped_lock lock{mutex};
+    if (outcome.reason == RouteReleaseReason3D::kExhausted) {
+      replan = outcome;
+    }
+    changed.notify_all();
+  };
+  config.update_handler = [&](RouteLifecycleUpdate3D update) {
+    const std::scoped_lock lock{mutex};
+    if (update.request.transaction->extension()) {
+      failed_extension = std::move(update);
+    } else if (update.request.transaction->replacement() &&
+               (update.candidate.available || !update.search_running)) {
+      replacement = std::move(update);
+    }
+    changed.notify_all();
+  };
+  config.rejection_handler = [&](const RoutePlanningRejection3D& value) {
+    const std::scoped_lock lock{mutex};
+    rejection = value;
+    changed.notify_all();
+  };
+  RouteLifecycleCoordinator3D coordinator{supervisor, std::move(config)};
+  coordinator.start();
+  const RouteLifecycleExtensionOutcome3D requested =
+      coordinator.requestExtension(RouteLifecycleExtensionRequest3D{
+          .world = input.world,
+          .active_route = route,
+          .navigation = input.navigation,
+          .objective = input.objective,
+          .route_projection = projection,
+          .stamp_ns = kFixtureStampNs,
+      });
+  bool completed{false};
+  {
+    std::unique_lock lock{mutex};
+    completed = changed.wait_for(lock, std::chrono::seconds{10}, [&] {
+      return replacement.has_value() || rejection.has_value() ||
+             (replan.has_value() &&
+              replan->status != RouteLifecycleReplanStatus3D::kQueued);
+    });
+  }
+  coordinator.stop();
+  ASSERT_TRUE(completed);
+  EXPECT_EQ(requested.status, RouteLifecycleExtensionStatus3D::kSearchQueued);
+  ASSERT_TRUE(failed_extension.has_value());
+  const auto& failed =
+      failed_extension.value(); // NOLINT(bugprone-unchecked-optional-access)
+  EXPECT_EQ(failed.planner_update.status,
+            RoutePlannerUpdateStatus3D::kStitchBeyondCertifiedRoute);
+  ASSERT_TRUE(replan.has_value());
+  const auto& requested_replan =
+      replan.value(); // NOLINT(bugprone-unchecked-optional-access)
+  EXPECT_EQ(requested_replan.status, RouteLifecycleReplanStatus3D::kQueued);
+  EXPECT_EQ(requested_replan.search_start.x, 10.0);
+  EXPECT_EQ(requested_replan.search_start.y, 0.0);
+  EXPECT_EQ(requested_replan.search_start.z, 5.0);
+  ASSERT_FALSE(rejection.has_value());
+  ASSERT_TRUE(replacement.has_value());
+  const auto& successor =
+      replacement.value(); // NOLINT(bugprone-unchecked-optional-access)
+  EXPECT_TRUE(successor.planner_update.planner_invoked);
+  EXPECT_TRUE(successor.candidate.available);
+  EXPECT_EQ(successor.request.transaction->release_reason,
+            RouteReleaseReason3D::kExhausted);
+  EXPECT_FALSE(successor.activation.admission.successor_compared_to_pending);
+  EXPECT_TRUE(successor.activation.admission.certified_pending)
+      << "activation="
+      << staticRouteActivationStatusName(
+             successor.activation.admission.activation_status)
+      << " candidate="
+      << staticRouteCandidateStatusName(
+             successor.activation.admission.candidate_validation.status)
+      << " handoff="
+      << dynamicHandoffStatus3DName(successor.activation.admission.handoff.status)
+      << " trajectory="
+      << compiledTrajectoryFailureReason3DName(
+             successor.activation.admission.trajectory_validation.reason)
+      << " publication="
+      << routePublicationStatus3DName(
+             successor.activation.admission.assessment.publication.status);
+  EXPECT_EQ(supervisor.plan(), resident);
+  const auto pending = supervisor.pending();
+  ASSERT_NE(pending, nullptr);
+
+  // A later result for the same exhausted route must not displace an
+  // equivalent successor that is already certified and waiting for handoff.
+  RoutePlanner3D second_planner{plannerConfig()};
+  RoutePlannerUpdate3D second_update =
+      second_planner.update(*successor.request.transaction, vehicleState(input));
+  ASSERT_TRUE(second_update.improved_incumbent.has_value());
+  RouteLifecycleCoordinator3D second_coordinator{
+      supervisor, lifecycleConfig(input, supervisor, commits)};
+  const RouteLifecycleUpdate3D second_result =
+      second_coordinator.advance(RoutePlanningUpdateEvent3D{
+          .request =
+              RoutePlanningRequest3D{.transaction = successor.request.transaction,
+                                     .continuation_session = nullptr},
+          .vehicle_state = vehicleState(input),
+          .update = std::move(second_update),
+      });
+  EXPECT_TRUE(second_result.activation.admission.successor_compared_to_pending);
+  EXPECT_FALSE(second_result.activation.admission.certified_pending);
+  EXPECT_EQ(supervisor.pending(), pending);
 }
 
 } // namespace

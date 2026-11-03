@@ -473,6 +473,22 @@ RouteLifecycleCoordinator3D::advance(RoutePlanningUpdateEvent3D event) {
 
   if (!result.continuation_queued) {
     finishSearch(*transaction, result.activation.admission.certified_pending);
+    // A partial route cannot be extended once its required stitch lies past
+    // its certified end. Repeating the extension would ask for the same
+    // impossible stitch; search from the vehicle instead, keeping the current
+    // execution until a successor passes the normal activation checks.
+    const auto& continuity_base = transaction->continuity_base;
+    if (transaction->extension() &&
+        result.planner_update.status ==
+            RoutePlannerUpdateStatus3D::kStitchBeyondCertifiedRoute &&
+        continuity_base.has_value()) {
+      const auto& base = continuity_base.value();
+      if (base.route != nullptr &&
+          !base.route->identity.proposal.reaches_mission_goal) {
+        static_cast<void>(requestReplan(RouteReleaseReason3D::kExhausted,
+                                        transaction->request.base_route_generation));
+      }
+    }
   }
 
   const RouteLifecycleTrackingContext3D tracking = config_.tracking_context_provider();

@@ -258,6 +258,14 @@ goal-reaching route is not arrival: capture separately requires the vehicle's
 position, speed and execution evidence, and the flight check judges arrival in
 simulation truth.
 
+If an extension of a partial route cannot place its required stitch inside the
+certified route, the lifecycle finishes that extension and requests a fresh
+search from the vehicle. When there is no eligible pending successor, a
+validated replacement for that exhausted partial route is not rejected merely
+because it has the same mission intent. The current execution remains in place
+until the replacement passes the normal route and handoff certification; an
+already eligible pending successor retains its normal arbitration.
+
 `RouteMaterializer3D` receives one owned request containing the exact planner
 transaction, candidate, active certified route, current position, and raw-world
 snapshot. It owns constrained-span construction, splice-preserving geometry
