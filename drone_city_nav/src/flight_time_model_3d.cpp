@@ -172,6 +172,29 @@ bool FlightTimeModel3D::valid() const noexcept {
          finitePositive(maximum_yaw_rate_radps);
 }
 
+double
+turnAccelerationLimit3D(const Vec3& incoming_unit_tangent,
+                        const Vec3& outgoing_unit_tangent,
+                        const double maximum_lateral_acceleration_mps2,
+                        const double maximum_vertical_acceleration_mps2) noexcept {
+  if (!finitePositive(maximum_lateral_acceleration_mps2) ||
+      !finitePositive(maximum_vertical_acceleration_mps2)) {
+    return 0.0;
+  }
+  const double dx = outgoing_unit_tangent.x - incoming_unit_tangent.x;
+  const double dy = outgoing_unit_tangent.y - incoming_unit_tangent.y;
+  const double dz = outgoing_unit_tangent.z - incoming_unit_tangent.z;
+  const double change = std::hypot(std::hypot(dx, dy), dz);
+  if (!std::isfinite(change)) {
+    return 0.0;
+  }
+  if (change <= kEpsilon || std::abs(dz) <= kEpsilon) {
+    return maximum_lateral_acceleration_mps2;
+  }
+  return std::min(maximum_lateral_acceleration_mps2,
+                  maximum_vertical_acceleration_mps2 * change / std::abs(dz));
+}
+
 double minimumFlightTranslationTime3D(const Point3& first, const Point3& second,
                                       const FlightTimeModel3D& model) noexcept {
   if (!model.valid()) {

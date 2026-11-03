@@ -7,6 +7,7 @@
 #include <array>
 #include <cmath>
 #include <limits>
+#include <numbers>
 
 namespace drone_city_nav {
 namespace {
@@ -727,6 +728,60 @@ TEST(MppiSpeedPolicyTest, UpcomingTurnReducesReferenceSpeedBeforeTurn) {
   EXPECT_GT(result.maximum_preview_curvature_1pm, 0.19);
   EXPECT_LT(result.curvature_limit_mps, 14.0);
   EXPECT_LT(result.reference_speed_mps, config.cruise_speed_mps);
+}
+
+TEST(MppiSpeedPolicyTest, VerticalTurnUsesTheVerticalAccelerationCapability) {
+  MppiSpeedPolicyConfig config;
+  config.cruise_speed_mps = 10.0;
+  config.absolute_speed_limit_mps = 10.0;
+  config.maximum_lateral_acceleration_mps2 = 4.0;
+  config.sensor_braking_contract.maximum_vertical_acceleration_mps2 = 1.4;
+  config.stopping_capability.guaranteed_vertical_deceleration_mps2 = 1.4;
+  allowHighSensorBrakingSpeed(config);
+  const std::array<RouteSample3D, 4> horizontal{
+      RouteSample3D{.position = {0.0, 0.0, 0.0}},
+      RouteSample3D{.position = {2.0, 0.0, 0.0}},
+      RouteSample3D{.position = {2.0, 2.0, 0.0}},
+      RouteSample3D{.position = {2.0, 4.0, 0.0}}};
+  const std::array<RouteSample3D, 4> climb{RouteSample3D{.position = {0.0, 0.0, 0.0}},
+                                           RouteSample3D{.position = {2.0, 0.0, 0.0}},
+                                           RouteSample3D{.position = {2.0, 0.0, 2.0}},
+                                           RouteSample3D{.position = {2.0, 0.0, 4.0}}};
+  const std::array<RouteSample3D, 4> descent{
+      RouteSample3D{.position = {0.0, 0.0, 0.0}},
+      RouteSample3D{.position = {2.0, 0.0, 0.0}},
+      RouteSample3D{.position = {2.0, 0.0, -2.0}},
+      RouteSample3D{.position = {2.0, 0.0, -4.0}}};
+  const double horizontal_step = std::numbers::sqrt3;
+  const std::array<RouteSample3D, 4> sloped{
+      RouteSample3D{.position = {0.0, 0.0, 0.0}},
+      RouteSample3D{.position = {horizontal_step, 0.0, 1.0}},
+      RouteSample3D{.position = {horizontal_step, horizontal_step, 2.0}},
+      RouteSample3D{.position = {horizontal_step, 2.0 * horizontal_step, 3.0}}};
+  MppiSpeedPolicyInput input;
+  input.terminal_goal_limit_enabled = false;
+  input.route = horizontal;
+  const auto level = evaluateMppiSpeedPolicy(config, input);
+  input.route = climb;
+  const auto up = evaluateMppiSpeedPolicy(config, input);
+  input.route = descent;
+  const auto down = evaluateMppiSpeedPolicy(config, input);
+  input.route = sloped;
+  const auto constant_slope = evaluateMppiSpeedPolicy(config, input);
+  config.sensor_braking_contract.maximum_vertical_acceleration_mps2 = 4.0;
+  input.route = horizontal;
+  const auto level_relaxed = evaluateMppiSpeedPolicy(config, input);
+  input.route = climb;
+  const auto up_relaxed = evaluateMppiSpeedPolicy(config, input);
+  input.route = sloped;
+  const auto constant_slope_relaxed = evaluateMppiSpeedPolicy(config, input);
+
+  EXPECT_LT(up.curvature_limit_mps, level.curvature_limit_mps);
+  EXPECT_NEAR(up.curvature_limit_mps, down.curvature_limit_mps, 1.0e-9);
+  EXPECT_DOUBLE_EQ(level.curvature_limit_mps, level_relaxed.curvature_limit_mps);
+  EXPECT_DOUBLE_EQ(up_relaxed.curvature_limit_mps, level.curvature_limit_mps);
+  EXPECT_DOUBLE_EQ(constant_slope.curvature_limit_mps,
+                   constant_slope_relaxed.curvature_limit_mps);
 }
 
 TEST(MppiSpeedPolicyTest, RouteConstraintAndGoalApplyIndependentCaps) {

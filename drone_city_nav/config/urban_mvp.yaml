@@ -349,7 +349,9 @@ production_mppi_node:
     # the route time profile. It cannot exceed the horizontal acceleration
     # above: every published control is clamped to that magnitude as a
     # vector, so a turn and a braking share the one budget, whatever the
-    # airframe's tilt would admit. At 8 the law let a right-angle corner in a
+    # airframe's tilt would admit. For turns with a vertical normal component,
+    # the curvature limit also respects maximum_vertical_acceleration_mps2;
+    # level turns are unchanged. At 8 the law let a right-angle corner in a
     # passage be entered at 3.0 to 4.2 m/s; the vehicle, braking under the
     # clearance law at the same time, turned at 1.8 m/s^2, cut the corner by
     # 1.4 m and stopped against the wall, eight times in 25 s on the lidar

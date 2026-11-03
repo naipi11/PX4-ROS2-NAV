@@ -6,6 +6,18 @@ release names the asset tags it was validated with.
 
 ## Unreleased
 
+### Three-dimensional turn limits
+
+- Bound curvature speed by the acceleration available in the turn's vertical
+  normal direction, in both the MPPI speed policy and the compiled route time
+  profile. Horizontal turns keep their existing limit. Regression tests cover
+  climbing, descending, and a constant-slope horizontal turn.
+- r3180 approached a known wall through a vertical turn and showed significant
+  command-tracking lag. Its exact original horizon and raw scan were not
+  recorded, so this correction is not proof that its collision is resolved.
+  The dirty-checkout lidar smoke r3330 completed without contact at 3.121 m/s
+  and 0.80 m true goal error; it is not an acceptance flight.
+
 ### Real-sensor evaluation
 
 - Evaluate the production stereo-depth node on four synchronized RGB-NIR and

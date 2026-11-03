@@ -114,6 +114,45 @@ TEST(RouteTimeParameterizationTest, CurvatureAndVerticalMotionCapTheSameProfile)
   EXPECT_LE(vertical_profile.reference_speeds_mps.back(), 2.0);
 }
 
+TEST(RouteTimeParameterizationTest, VerticalTurnHonorsVerticalAccelerationLimit) {
+  const std::vector<RouteSample3D> horizontal{
+      {.position = {0.0, 0.0, 0.0}, .tangent = {1.0, 0.0, 0.0}, .station_m = 0.0},
+      {.position = {2.0, 0.0, 0.0}, .tangent = {0.0, 1.0, 0.0}, .station_m = 2.0},
+      {.position = {2.0, 2.0, 0.0}, .tangent = {0.0, 1.0, 0.0}, .station_m = 4.0},
+      {.position = {2.0, 4.0, 0.0}, .tangent = {0.0, 1.0, 0.0}, .station_m = 6.0}};
+  const std::vector<RouteSample3D> vertical{
+      {.position = {0.0, 0.0, 0.0}, .tangent = {1.0, 0.0, 0.0}, .station_m = 0.0},
+      {.position = {2.0, 0.0, 0.0}, .tangent = {0.0, 0.0, 1.0}, .station_m = 2.0},
+      {.position = {2.0, 0.0, 2.0}, .tangent = {0.0, 0.0, 1.0}, .station_m = 4.0},
+      {.position = {2.0, 0.0, 4.0}, .tangent = {0.0, 0.0, 1.0}, .station_m = 6.0}};
+  FlightTimeModel3D model = testTimeModel();
+  model.maximum_vertical_acceleration_mps2 = 1.4;
+  const auto level = parameterizeRouteTime3D(horizontal, {}, 10.0, 3.0,
+                                             RouteEndpointSemantics3D::kContinuation,
+                                             4.0, model, Vec3{1.0, 0.0, 0.0});
+  const auto climb = parameterizeRouteTime3D(vertical, {}, 10.0, 3.0,
+                                             RouteEndpointSemantics3D::kContinuation,
+                                             4.0, model, Vec3{1.0, 0.0, 0.0});
+  model.maximum_vertical_acceleration_mps2 = 4.0;
+  const auto relaxed_climb = parameterizeRouteTime3D(
+      vertical, {}, 10.0, 3.0, RouteEndpointSemantics3D::kContinuation, 4.0, model,
+      Vec3{1.0, 0.0, 0.0});
+
+  ASSERT_TRUE(level.valid);
+  ASSERT_TRUE(climb.valid);
+  ASSERT_GT(level.reference_speeds_mps.size(), 1U);
+  ASSERT_GT(climb.reference_speeds_mps.size(), 1U);
+  ASSERT_TRUE(relaxed_climb.valid);
+  ASSERT_GT(relaxed_climb.reference_speeds_mps.size(), 1U);
+  EXPECT_LT(climb.reference_speeds_mps[1U], level.reference_speeds_mps[1U]);
+  const double turn_curvature = std::numbers::pi / 8.0;
+  EXPECT_NEAR(level.reference_speeds_mps[1U], std::sqrt(4.0 / turn_curvature), 1.0e-9);
+  EXPECT_NEAR(climb.reference_speeds_mps[1U],
+              std::sqrt(1.4 * std::numbers::sqrt2 / turn_curvature), 1.0e-9);
+  EXPECT_NEAR(relaxed_climb.reference_speeds_mps[1U], level.reference_speeds_mps[1U],
+              1.0e-9);
+}
+
 TEST(RouteTimeParameterizationTest,
      DiagonalMotionHonorsTheCompleteTranslationalSpeedLimit) {
   constexpr double kLengthM{20.0};

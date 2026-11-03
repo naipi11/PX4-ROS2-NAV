@@ -205,8 +205,27 @@ validator then refuses.
 ## Reference Speed
 
 The reference speed the controller aims for is capped by several limiters, and
-the tightest one wins. Two of them are shaped by what the vehicle is actually
-doing:
+the tightest one wins.
+
+The curvature limiter and the compiled route time profile bound a turn's
+normal acceleration by both the lateral limit and its vertical component:
+for vertical normal share `n_z`, the limit is the smaller of the lateral
+acceleration and `maximum_vertical_acceleration_mps2 / |n_z|`. A horizontal
+turn and a constant-slope horizontal turn keep their earlier limit. Previously
+both paths applied the lateral limit to three-dimensional turns even where the
+vertical axis allowed less. In r3180 the logged route bent from a horizontal
+approach into a climb before the vehicle hit a known wall; its exact horizon
+and nearby raw scan were not retained. On the sparse logged route, interpolated
+for diagnosis, the revised turn cap was 2.20 m/s instead of 2.76 m/s near the
+approach. This is not a reconstruction of the full route or proof that the
+collision would have been avoided: the limit bounds the normal component alone,
+not simultaneous tangential acceleration, and the vehicle also lagged its
+commanded motion. Diagnostic r3330 completed a lidar mission without contact at
+3.121 m/s, with 0.80 m true goal error; its checkout was dirty, so it is not
+an acceptance flight. The retained measurements are under
+`log/runs/r3180/` and `log/runs/r3330/`.
+
+Two of them are shaped by what the vehicle is actually doing:
 
 - The `clearance` limiter reads the horizon **execution currently owns**,
   measured against the world as it stands now (`executed_horizon_clearance_3d`).

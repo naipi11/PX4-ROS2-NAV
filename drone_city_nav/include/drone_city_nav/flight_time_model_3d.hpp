@@ -44,6 +44,15 @@ struct FlightPathTimeProfile3D {
   std::vector<double> departure_times_s;
 };
 
+// Bound the acceleration normal to a turn by both the lateral limit and the
+// vertical component's limit. The tangents are unit vectors; straight motion
+// keeps the lateral limit. Used by both route timing and the speed policy.
+[[nodiscard]] double
+turnAccelerationLimit3D(const Vec3& incoming_unit_tangent,
+                        const Vec3& outgoing_unit_tangent,
+                        double maximum_lateral_acceleration_mps2,
+                        double maximum_vertical_acceleration_mps2) noexcept;
+
 // Admissible anisotropic travel-time lower bound used by the persistent graph.
 // The complete path profile below adds acceleration, jerk, and stop-turn time.
 [[nodiscard]] double

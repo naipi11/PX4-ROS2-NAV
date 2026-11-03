@@ -15,10 +15,17 @@ constexpr double kEpsilon{1.0e-6};
   return std::hypot(std::hypot(value.x, value.y), value.z);
 }
 
-[[nodiscard]] double routeCurvature(const std::span<const RouteSample3D> route,
-                                    const std::size_t index) noexcept {
+struct TurnGeometry3D {
+  double curvature{0.0};
+  Vec3 incoming{};
+  Vec3 outgoing{};
+};
+
+[[nodiscard]] TurnGeometry3D
+routeTurnGeometry(const std::span<const RouteSample3D> route,
+                  const std::size_t index) noexcept {
   if (index == 0U || index + 1U >= route.size()) {
-    return 0.0;
+    return {};
   }
   const Vec3& before = route[index - 1U].tangent;
   const Vec3& after = route[index].tangent;
@@ -27,13 +34,17 @@ constexpr double kEpsilon{1.0e-6};
   const double distance_m = route[index + 1U].station_m - route[index - 1U].station_m;
   if (!(before_norm > kEpsilon) || !(after_norm > kEpsilon) ||
       !(distance_m > kEpsilon)) {
-    return 0.0;
+    return {};
   }
-  const double cosine =
-      std::clamp((before.x * after.x + before.y * after.y + before.z * after.z) /
-                     (before_norm * after_norm),
-                 -1.0, 1.0);
-  return std::acos(cosine) / distance_m;
+  const Vec3 incoming{before.x / before_norm, before.y / before_norm,
+                      before.z / before_norm};
+  const Vec3 outgoing{after.x / after_norm, after.y / after_norm, after.z / after_norm};
+  const double cosine = std::clamp(incoming.x * outgoing.x + incoming.y * outgoing.y +
+                                       incoming.z * outgoing.z,
+                                   -1.0, 1.0);
+  return TurnGeometry3D{.curvature = std::acos(cosine) / distance_m,
+                        .incoming = incoming,
+                        .outgoing = outgoing};
 }
 
 [[nodiscard]] double constrainedLimit(const RouteSample3D& sample,
@@ -82,10 +93,15 @@ RouteTimeParameterization3D parameterizeRouteTime3D(
         (index > 0U && !(route[index].station_m > route[index - 1U].station_m))) {
       return {};
     }
-    const double curvature = routeCurvature(route, index);
+    const TurnGeometry3D turn = routeTurnGeometry(route, index);
     const double curvature_limit =
-        curvature > kEpsilon ? std::sqrt(maximum_lateral_acceleration_mps2 / curvature)
-                             : std::numeric_limits<double>::infinity();
+        turn.curvature > kEpsilon
+            ? std::sqrt(turnAccelerationLimit3D(
+                            turn.incoming, turn.outgoing,
+                            maximum_lateral_acceleration_mps2,
+                            time_model.maximum_vertical_acceleration_mps2) /
+                        turn.curvature)
+            : std::numeric_limits<double>::infinity();
     const double tracking_limit = tracking_speed_limits_mps.empty()
                                       ? std::numeric_limits<double>::infinity()
                                       : tracking_speed_limits_mps[index];

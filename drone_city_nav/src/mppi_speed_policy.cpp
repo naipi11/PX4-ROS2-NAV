@@ -1,5 +1,6 @@
 #include "drone_city_nav/mppi_speed_policy.hpp"
 
+#include "drone_city_nav/flight_time_model_3d.hpp"
 #include "drone_city_nav/mppi/mppi_clearance_cost.hpp"
 #include "drone_city_nav/stopping_distance.hpp"
 
@@ -32,12 +33,18 @@ nearestGuideIndex(const mppi::State& state,
   return nearest_index;
 }
 
-[[nodiscard]] double turnCurvature(const Point3& first, const Point3& center,
-                                   const Point3& last) noexcept {
+struct TurnGeometry3D {
+  double curvature{0.0};
+  Vec3 incoming{};
+  Vec3 outgoing{};
+};
+
+[[nodiscard]] TurnGeometry3D turnGeometry(const Point3& first, const Point3& center,
+                                          const Point3& last) noexcept {
   const double first_length = distance3D(first, center);
   const double second_length = distance3D(center, last);
   if (first_length <= 1.0e-6 || second_length <= 1.0e-6) {
-    return 0.0;
+    return {};
   }
   const Vec3 first_direction{(center.x - first.x) / first_length,
                              (center.y - first.y) / first_length,
@@ -49,14 +56,18 @@ nearestGuideIndex(const mppi::State& state,
                                     first_direction.y * second_direction.y +
                                     first_direction.z * second_direction.z,
                                 -1.0, 1.0);
-  return std::acos(dot) / (0.5 * (first_length + second_length));
+  return TurnGeometry3D{.curvature =
+                            std::acos(dot) / (0.5 * (first_length + second_length)),
+                        .incoming = first_direction,
+                        .outgoing = second_direction};
 }
 
-[[nodiscard]] double windowedTurnCurvature(const std::span<const RouteSample3D> route,
-                                           const std::size_t center_index,
-                                           const double measurement_window_m) noexcept {
+[[nodiscard]] TurnGeometry3D
+windowedTurnGeometry(const std::span<const RouteSample3D> route,
+                     const std::size_t center_index,
+                     const double measurement_window_m) noexcept {
   if (center_index == 0U || center_index + 1U >= route.size()) {
-    return 0.0;
+    return {};
   }
   const double half_window_m = 0.5 * measurement_window_m;
   std::size_t first_index = center_index;
@@ -74,10 +85,10 @@ nearestGuideIndex(const mppi::State& state,
     ++last_index;
   }
   if (first_index == center_index || last_index == center_index) {
-    return 0.0;
+    return {};
   }
-  return turnCurvature(route[first_index].position, route[center_index].position,
-                       route[last_index].position);
+  return turnGeometry(route[first_index].position, route[center_index].position,
+                      route[last_index].position);
 }
 
 // The direction the sensor-braking contract is assessed along: the velocity
@@ -520,15 +531,17 @@ MppiSpeedPolicyResult evaluateMppiSpeedPolicy(const MppiSpeedPolicyConfig& confi
          ++index) {
       distance_to_turn_m +=
           distance3D(input.route[index - 1U].position, input.route[index].position);
-      const double curvature = windowedTurnCurvature(
+      const TurnGeometry3D turn = windowedTurnGeometry(
           input.route, index, config.curvature_measurement_window_m);
       result.maximum_preview_curvature_1pm =
-          std::max(result.maximum_preview_curvature_1pm, curvature);
-      if (curvature <= 1.0e-6) {
+          std::max(result.maximum_preview_curvature_1pm, turn.curvature);
+      if (turn.curvature <= 1.0e-6) {
         continue;
       }
-      const double turn_speed =
-          std::sqrt(config.maximum_lateral_acceleration_mps2 / curvature);
+      const double acceleration_limit = turnAccelerationLimit3D(
+          turn.incoming, turn.outgoing, config.maximum_lateral_acceleration_mps2,
+          config.sensor_braking_contract.maximum_vertical_acceleration_mps2);
+      const double turn_speed = std::sqrt(acceleration_limit / turn.curvature);
       const double approach_limit = stoppingLimitedSpeed(
           distance_to_turn_m, turn_speed, config.stopping_capability,
           config.sensor_braking_contract, input.forward_acceleration_mps2);
