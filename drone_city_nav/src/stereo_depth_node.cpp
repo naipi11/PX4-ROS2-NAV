@@ -90,6 +90,8 @@ public:
     if (!stereoDepthReturnsConfigIsValid(geometry_, returns_config_)) {
       throw std::invalid_argument{"invalid stereo depth configuration"};
     }
+    focal_baseline_m_px_ = geometry_.focal_px * geometry_.baseline_m;
+    confident_depth_m_ = stereoConfidentDepthM(geometry_, returns_config_);
     // Far and near are matched apart. A search of 256 disparities at full
     // resolution costs 187 ms on two threads; the far surfaces need the full
     // resolution and only a short search, the near ones a long search and
@@ -193,8 +195,7 @@ public:
         get_logger(),
         "STEREO_DEPTH ready focal_px=%.1f baseline_m=%.2f confident_depth_m=%.2f "
         "disparities=%d stride=%zu",
-        geometry_.focal_px, geometry_.baseline_m,
-        stereoConfidentDepthM(geometry_, returns_config_), disparities,
+        geometry_.focal_px, geometry_.baseline_m, confident_depth_m_, disparities,
         returns_config_.pixel_stride);
   }
 
@@ -297,8 +298,6 @@ private:
                          cv::BORDER_REPLICATE);
       near_matcher_->compute(border_left_, border_right_, border_disparity_);
     }
-    const double focal_baseline = geometry_.focal_px * geometry_.baseline_m;
-    const double confident_depth = stereoConfidentDepthM(geometry_, returns_config_);
     // Where the near search sees a surface the far search cannot reach (its
     // disparity, doubled, within eight pixels of the far search's end), and
     // where the far search found nothing, the near answer stands. Only the
@@ -316,8 +315,8 @@ private:
           const std::int16_t supported_near = border_disparity_.at<std::int16_t>(
               row / 2, column / 2 + near_disparities_);
           far = detail::conservativeBorderDisparity16(
-              far, supported_near, column, half_block_radius_, focal_baseline,
-              confident_depth, returns_config_.disparity_error_px);
+              far, supported_near, column, half_block_radius_, focal_baseline_m_px_,
+              confident_depth_m_, returns_config_.disparity_error_px);
         }
       }
     }
@@ -495,7 +494,7 @@ private:
       return points;
     }
     unobservable_confirmed_s_ = stamp_s;
-    const double far_m = stereoConfidentDepthM(geometry_, returns_config_);
+    const double far_m = confident_depth_m_;
     for (int row = kRayPitchPx / 2; row < static_cast<int>(image_height_);
          row += kRayPitchPx) {
       for (int column = kRayPitchPx / 2; column < static_cast<int>(image_width_);
@@ -635,6 +634,8 @@ private:
   std::size_t image_height_{0U};
   StereoPairGeometry geometry_{};
   StereoDepthReturnsConfig returns_config_{};
+  double focal_baseline_m_px_{0.0};
+  double confident_depth_m_{0.0};
   int far_disparities_{64};
   int near_disparities_{128};
   int half_block_radius_{2};
