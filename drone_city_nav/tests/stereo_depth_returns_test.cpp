@@ -6,6 +6,8 @@
 #include <cstdint>
 #include <vector>
 
+#include "stereo_depth_border_internal.hpp"
+
 namespace drone_city_nav {
 namespace {
 
@@ -82,6 +84,79 @@ TEST(StereoDepthReturns, TheStrideThinsTheReturns) {
                                           kGeometry.baseline_m / 3.0));
   EXPECT_EQ(stereoDepthReturns(disparity, 16U, 8U, kGeometry, config).size(), 4U * 2U);
   EXPECT_TRUE(stereoDepthReturns(disparity, 16U, 7U, kGeometry, config).empty());
+}
+
+TEST(StereoDepthReturns, SupportedBorderMatchCannotCarveThroughANearSurface) {
+  // The retained real-scene sample at column 116 had an aliased 2.1875 px
+  // far match while a supported near match places the surface near 2.04 m.
+  const StereoPairGeometry geometry{.focal_px = 1164.779,
+                                    .principal_x_px = 570.726,
+                                    .principal_y_px = 463.526,
+                                    .baseline_m = 0.193006};
+  StereoDepthReturnsConfig config;
+  config.pixel_stride = 1U;
+  const double fb = geometry.focal_px * geometry.baseline_m;
+  const double confident = stereoConfidentDepthM(geometry, config);
+  const std::int16_t original{35};
+  const std::int16_t corrected = detail::conservativeBorderDisparity16(
+      original, 880, 116, 2, fb, confident, config.disparity_error_px);
+  const auto before =
+      stereoDepthReturns(std::vector<std::int16_t>{original}, 1U, 1U, geometry, config);
+  const auto after = stereoDepthReturns(std::vector<std::int16_t>{corrected}, 1U, 1U,
+                                        geometry, config);
+  ASSERT_EQ(before.size(), 1U);
+  ASSERT_EQ(after.size(), 1U);
+  EXPECT_FALSE(before.front().hit);
+  EXPECT_GT(before.front().point.x, 11.0);
+  EXPECT_TRUE(after.front().hit);
+  EXPECT_NEAR(after.front().point.x, 2.04, 0.01);
+}
+
+TEST(StereoDepthReturns, UnsupportedBorderSearchProducesNoNewObservation) {
+  constexpr double fb{100.0};
+  constexpr double confident{7.45};
+  constexpr double error{0.45};
+  EXPECT_LE(
+      detail::conservativeBorderDisparity16(160, -16, 116, 2, fb, confident, error), 0);
+  // The matching block would reach into the synthetic padding, not the image.
+  EXPECT_LE(
+      detail::conservativeBorderDisparity16(160, 960, 116, 2, fb, confident, error), 0);
+  // A padded match must never turn an originally missing return into evidence.
+  EXPECT_LE(
+      detail::conservativeBorderDisparity16(-16, 880, 116, 2, fb, confident, error), 0);
+}
+
+TEST(StereoDepthReturns, BorderCorrectionNeverExtendsTheOriginalFreeRay) {
+  const StereoPairGeometry geometry{.focal_px = 100.0,
+                                    .principal_x_px = 0.0,
+                                    .principal_y_px = 0.0,
+                                    .baseline_m = 1.0};
+  StereoDepthReturnsConfig config;
+  config.pixel_stride = 1U;
+  config.minimum_range_m = 0.0;
+  const double fb = geometry.focal_px * geometry.baseline_m;
+  const double confident = stereoConfidentDepthM(geometry, config);
+  // Crossing from a free-only ray to a hit can otherwise extend the ray even
+  // when the selected disparity is larger, due to the old error allowance.
+  EXPECT_LE(detail::conservativeBorderDisparity16(212, 108, 64, 2, fb, confident,
+                                                  config.disparity_error_px),
+            0);
+  for (int old16 = 8; old16 <= 512; old16 += 7) {
+    const auto old = static_cast<std::int16_t>(old16);
+    const auto before =
+        stereoDepthReturns(std::vector<std::int16_t>{old}, 1U, 1U, geometry, config);
+    ASSERT_EQ(before.size(), 1U);
+    for (int half16 = 8; half16 <= 512; half16 += 11) {
+      const auto corrected = detail::conservativeBorderDisparity16(
+          old, static_cast<std::int16_t>(half16), 128, 2, fb, confident,
+          config.disparity_error_px);
+      const auto after = stereoDepthReturns(std::vector<std::int16_t>{corrected}, 1U,
+                                            1U, geometry, config);
+      if (!after.empty()) {
+        EXPECT_LE(after.front().point.x, before.front().point.x + 1.0e-12);
+      }
+    }
+  }
 }
 
 } // namespace

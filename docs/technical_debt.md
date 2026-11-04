@@ -246,6 +246,15 @@ simulation workstation.
 | A wrong stereo disparity can be emitted as a free ray through a real visible surface: `stereoDepthReturns` assumes the configured disparity error bounds the match. On Middlebury `PlaytableP` the actual node, after the official PFM units and nonocclusion mask were applied, sent 1,064 of 65,205 reference-visible sampled pixels as free rays over 0.25 m past the surface; one surface at 2.04 m was marked free to 11.18 m. The same pixels' relaxed-confidence matches missed the reference by 125.1 px at the median; an independent reciprocal check still accepted 708. On a different synchronized RGB-NIR camera the worst training-scene p99 was 45.39 px, with 34 of 2,139 daylight holdout hits above it and no hits in the complex-indoor holdout. Sparse lidar coverage and visibility do not certify that percentile. A sound real-camera confidence and detection-range contract needs a deeper sensor-confidence/coverage treatment, independent reference and measured airframe braking; a simple reciprocal check is insufficient. No real-flight range is approved by these measurements. | `PlaytableP`: 1,064 visible free-ray overreaches, 708 pass the diagnostic reciprocal check; RGB-NIR candidate 1.166 m is below the simulated 2.0 m margin | (b) | real-data evaluation, 2026-11-03 |
 | The frames give almost no warning of a fading light. The camera's gain and the matcher hold the depth until the light is under a hundredth of itself, and the light headroom the contract reads (specification K15) sees only the last quarter of a fade over distance, less than the stop from 2 m/s when the fade is 8 m long: r800 and r906 flew into the dark. The light's failures in time ramp in 0.2 s or more and are read; a fade over distance is not injected any more. It matters again for smoke (roadmap items 18, 23). The repair reads the gain itself, or the exposure, as the measure of the light, which reaches the contract's central input. | r906: at rest 1.5 m from the centre of a fade 8 m long | (b) | item 17 |
 
+The 2026-11-04 border correction removes one cause of the real-stereo
+overreach, not the general defect. Actual-node replay on `PlaytableP` still
+shows 404 free-only rays and 473 hits beyond visible surfaces; its short hits
+rise from 959 to 1,015. On `Jadeplant` the true disparities exceed the
+configured search and its 5,800 overreaching outputs are unchanged. No new
+sampled ray was created or extended in the six static A/B replays, but that
+property does not prove their remaining rays correct. The original real-camera
+confidence and braking-range debt above remains open.
+
 ## Planning, Execution And Control
 
 | Debt | Measured | Class | Found by |

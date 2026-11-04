@@ -30,6 +30,8 @@
 #include <utility>
 #include <vector>
 
+#include "stereo_depth_border_internal.hpp"
+
 namespace drone_city_nav {
 namespace {
 
@@ -100,9 +102,9 @@ public:
     // 80 to 200 ms beside it, the estimate diverged, and the vehicle crashed.
     cv::setNumThreads(declare_parameter<int>("matcher_threads", 2));
     far_disparities_ = declare_parameter<int>("far_disparity_px", 64);
-    const int near_disparities =
-        declare_parameter<int>("maximum_disparity_px", 256) / 2;
+    near_disparities_ = declare_parameter<int>("maximum_disparity_px", 256) / 2;
     const int block_size = declare_parameter<int>("block_size_px", 5);
+    half_block_radius_ = block_size / 2;
     const int left_right_difference =
         declare_parameter<int>("left_right_maximum_difference_px", 1);
     const int uniqueness = declare_parameter<int>("uniqueness_ratio_percent", 10);
@@ -113,8 +115,8 @@ public:
           cv::StereoSGBM::MODE_SGBM_3WAY);
     };
     far_matcher_ = matcher(far_disparities_);
-    near_matcher_ = matcher(near_disparities);
-    const int disparities = 2 * near_disparities;
+    near_matcher_ = matcher(near_disparities_);
+    const int disparities = 2 * near_disparities_;
     frame_id_ = declare_parameter<std::string>("frame_id", "stereo_left");
     // The light the frame has left (roadmap item 17 stage 7): the camera's
     // gain lifts the frame's 95th percentile of brightness to 200 of 255,
@@ -271,12 +273,37 @@ private:
     cv::resize(right_grey, right_half, {}, 0.5, 0.5, cv::INTER_AREA);
     cv::Mat near_disparity;
     near_matcher_->compute(left_half, right_half, near_disparity);
+    const auto stride = static_cast<int>(returns_config_.pixel_stride);
+    const int border_columns = std::min(disparity.cols, 2 * near_disparities_);
+    bool border_has_match{false};
+    for (int row = 0; row < disparity.rows && !border_has_match; row += stride) {
+      for (int column = 0; column < border_columns; column += stride) {
+        if (disparity.at<std::int16_t>(row, column) > 0 ||
+            near_disparity.at<std::int16_t>(row / 2, column / 2) > 0) {
+          border_has_match = true;
+          break;
+        }
+      }
+    }
+    if (border_has_match) {
+      // The normal near search has no output in the first search-width of
+      // its left image. Reuse the same matcher on a small padded strip, with
+      // one further search-width of real pixels as right-side context.
+      const int crop_width = std::min(left_half.cols, 2 * near_disparities_);
+      const cv::Rect crop{0, 0, crop_width, left_half.rows};
+      cv::copyMakeBorder(left_half(crop), border_left_, 0, 0, near_disparities_, 0,
+                         cv::BORDER_REPLICATE);
+      cv::copyMakeBorder(right_half(crop), border_right_, 0, 0, near_disparities_, 0,
+                         cv::BORDER_REPLICATE);
+      near_matcher_->compute(border_left_, border_right_, border_disparity_);
+    }
+    const double focal_baseline = geometry_.focal_px * geometry_.baseline_m;
+    const double confident_depth = stereoConfidentDepthM(geometry_, returns_config_);
     // Where the near search sees a surface the far search cannot reach (its
     // disparity, doubled, within eight pixels of the far search's end), and
     // where the far search found nothing, the near answer stands. Only the
     // pixels that become returns are merged.
     const int near_threshold_16 = 16 * (far_disparities_ - 8) / 2;
-    const auto stride = static_cast<int>(returns_config_.pixel_stride);
     for (int row = 0; row < disparity.rows; row += stride) {
       for (int column = 0; column < disparity.cols; column += stride) {
         const std::int16_t near = near_disparity.at<std::int16_t>(row / 2, column / 2);
@@ -284,6 +311,13 @@ private:
         if (near > near_threshold_16 || far <= 0) {
           far = near > 0 ? static_cast<std::int16_t>(std::min(32767, 2 * near))
                          : std::int16_t{-16};
+        }
+        if (border_has_match && column < border_columns && far > 0) {
+          const std::int16_t supported_near = border_disparity_.at<std::int16_t>(
+              row / 2, column / 2 + near_disparities_);
+          far = detail::conservativeBorderDisparity16(
+              far, supported_near, column, half_block_radius_, focal_baseline,
+              confident_depth, returns_config_.disparity_error_px);
         }
       }
     }
@@ -602,8 +636,13 @@ private:
   StereoPairGeometry geometry_{};
   StereoDepthReturnsConfig returns_config_{};
   int far_disparities_{64};
+  int near_disparities_{128};
+  int half_block_radius_{2};
   cv::Ptr<cv::StereoSGBM> far_matcher_;
   cv::Ptr<cv::StereoSGBM> near_matcher_;
+  cv::Mat border_left_;
+  cv::Mat border_right_;
+  cv::Mat border_disparity_;
   std::string frame_id_;
   sensor_msgs::msg::Image::ConstSharedPtr left_;
   sensor_msgs::msg::Image::ConstSharedPtr right_;

@@ -6,6 +6,22 @@ release names the asset tags it was validated with.
 
 ## Unreleased
 
+### Stereo border-search support
+
+- Recheck existing stereo returns in the near matcher's unsupported left
+  border with the same matcher on a padded, bounded strip. A match touching
+  synthetic padding is not evidence; a supported correction cannot create a
+  previously absent ray or extend its original free-space endpoint. ToF,
+  confidence settings, and braking rules are unchanged.
+- On the retained `PlaytableP` frame the actual node's visible free-ray
+  overreaches fell from 1,064 to 404 and its overreaching hits from 2,346 to
+  473; 56 additional hits fell more than 0.25 m in front of the reference.
+  Five held-out input pairs showed the same endpoint-monotonic property but
+  retained substantial errors. These static benchmarks and the sparse-lidar
+  recordings do not establish a real-camera detection or braking guarantee.
+  Dirty-checkout camera smoke r3640 completed without contact at 1.882 m/s
+  and 0.91 m true goal error; it is not an acceptance flight.
+
 ### Exhausted partial-route recovery
 
 - If an extension's required stitch is beyond the end of a partial certified

@@ -413,6 +413,41 @@ therefore a demonstrated safety fix. The original results that incorrectly
 scaled the PFM values or treated mask value 128 as nonoccluded are retained
 only as superseded investigation artifacts.
 
+On 2026-11-04 the near search's image boundary was measured separately: its
+half-resolution 128-disparity SGBM emits no search result in the first 256
+full-resolution columns. There, the far search can invent a small disparity
+while a nearer surface remains within the near search's nominal range. On the
+recorded `PlaytableP` frame, 660 of the 1,064 free-only overreaches and 1,876
+of 2,346 overreaching hits lay in that unsupported strip.
+
+The node now runs its existing near matcher on a padded left strip with real
+right-side context. A padded match is usable only when its complete matching
+block lies inside the original right image. It cannot create a return where
+the original matcher had none or extend an existing ray's free endpoint;
+unsupported border matches contribute no stereo evidence. The rest of the
+image, ToF returns and the configured stopping contract are unchanged.
+
+An actual-node replay of the same frame changed free-only overreaches from
+1,064 to 404 and hit overreaches from 2,346 to 473; near-side short hits rose
+from 959 to 1,015. In five previously unscored input pairs, free-only
+overreaches changed from 3,959 to 2,224 and hit overreaches from 10,080 to
+6,342; short hits rose from 3,706 to 3,825. Three of the five are variants of
+already examined scenes, so these are not five independent environments. In
+both actual-node comparisons no sampled ray was newly created or extended,
+and changes were confined to the left border. No ToF input or continuous
+blindness was replayed. The two-thread cropped matcher cost 7.2 ms at the
+median in an isolated 15-sample measurement on `PlaytableP`, not a flight
+latency guarantee.
+
+This addresses the supported-border defect, not general stereo confidence.
+The remaining `PlaytableP` overreaches are real counterexamples. In
+`Jadeplant`, all 38,230 visible sampled references have disparities at or
+above the configured 256-pixel search; its erroneous outputs are unchanged by
+the border correction. The 0.45-pixel assumption is not established for a
+real camera, and no real-airframe detection range or braking guarantee follows.
+Evidence and both replay scripts are retained in
+`log/tools/vio/depth_visibility_20261103/continuation_20261104/`.
+
 The separate [pixel-aligned RGB-NIR stereo and lidar dataset](https://huggingface.co/datasets/DivisonOfficer/Pixel-aligned_RGB-NIR_stereo_dataset)
 provides synchronized moving-platform records. Four recordings supplied 90 frames
 whose image and lidar scan stamps differed by at most 20 ms. The 1440 x 1080

@@ -1832,6 +1832,7 @@ if(BUILD_TESTING)
 
   ament_add_gtest(stereo_depth_returns_test tests/stereo_depth_returns_test.cpp)
   target_compile_features(stereo_depth_returns_test PRIVATE cxx_std_20)
+  target_include_directories(stereo_depth_returns_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
   target_link_libraries(stereo_depth_returns_test drone_city_nav_core)
   enable_project_warnings(stereo_depth_returns_test)
 
