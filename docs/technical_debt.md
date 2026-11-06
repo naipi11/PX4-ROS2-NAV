@@ -236,6 +236,35 @@ dirty-checkout smoke resolves the r3400 attribution gap or passes its rejected
 series. Raw bags, map and replay sources are kept with `log/runs/r3460/` on the
 simulation workstation.
 
+The r3400 telemetry that was retained narrows the mechanism further, and names
+the one hypothesis the missing map would settle. Of the 600 track rows in the
+19.5 s slow interval, 59 carry the detailed executed-horizon samples; in 45 of
+them the sample's body clearance is under 0.05 m while its envelope clearance
+is over 0.30 m, so the reference is pinned by the *body* law while the envelope
+still admits motion. The gap between the two measures is 0.33 m at the median
+(p10 0.275, p90 0.342), which is not the 0.27 m the two radii alone would give
+(0.82 m envelope against 0.55 m body): the two laws are not reading the same
+evidence, the same split r3460 showed when its current zero came from a lower
+voxel and its future limit from one above. What cannot be settled from the
+telemetry is which axis supplies the body zero, because the sample carries only
+the two scalars and not the voxel.
+
+One candidate is specific and would be decisive if it holds:
+`kEstimateVerticalErrorM` is a single 0.5 m constant used only in
+`executed_horizon_clearance_3d.cpp`, added to both the body's lower and upper
+extents, so a slab between 0.85 and 1.35 m above the body's top edge reads as
+body contact. Its justification in the specification (K27) is entirely the
+*camera* estimator's height error, 0.3 to 0.6 m and 0.57 m by the end of an
+ordinary flight (r1183, r1184); the lidar profile, which is the profile r3400
+flew, inherits the same figure although the one measured lidar height error in
+the register is the 0.34 m offset near r3180's contact. A room whose ceiling
+sits inside that band would then crawl at the contact-departure speed for as
+long as it stayed under it, which is the shape of r3400's 19.5 s. Making the
+allowance the profile's own, from its own measured height error, is a control
+change and needs a lidar series; it is the owner's, with the measured cost of
+leaving it (a lidar profile that fails R3 at 2.378 m/s) against the measured
+cost of changing it (a smaller allowance protects less overhead clearance).
+
 ## Camera Perception
 
 | Debt | Measured | Class | Found by |
