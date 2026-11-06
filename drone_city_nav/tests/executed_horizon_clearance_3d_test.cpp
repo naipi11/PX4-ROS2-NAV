@@ -490,5 +490,79 @@ TEST(ExecutedHorizonClearance3DTest, TheRouteClearanceIgnoresUnobservedSpace) {
   EXPECT_FALSE(clearance.unobserved());
 }
 
+TEST(ExecutedHorizonClearance3DTest,
+     TheVerticalAllowanceIsTheProfilesOwnAndIsNotRoundedUp) {
+  // K27's allowance belongs to the estimator that produces the height. On a
+  // 0.25 m grid the camera's measured 0.5 m and the lidar's measured 0.34 m
+  // are different figures, not one band: rounding the allowance up to whole
+  // evidence cells made them equal, so a profile that holds its height better
+  // could not say so and a ceiling inside the camera's band held the reference
+  // at the contact-departure speed for the whole time the vehicle stood under
+  // it, which is the shape of r3400's 19.5 s at 0.064 m/s.
+  //
+  // A ceiling over a level motion: the body top is 0.35 m over the estimate,
+  // the slab's underside 1.00 m over the body's own lower extent, so the true
+  // gap from the body's top edge is 0.40 m. The allowance decides how much of
+  // it the body is charged with.
+  ObservedOccupancyGrid3D occupancy{GridBounds3D{
+      .resolution_m = 0.25, .width_cells = 16, .height_cells = 16, .depth_cells = 16}};
+  for (int x = 0; x < 16; ++x) {
+    for (int y = 0; y < 16; ++y) {
+      for (int z = 0; z < 16; ++z) {
+        occupancy.setState(GridIndex3D{x, y, z}, ObservedVoxelState::kFree);
+      }
+    }
+  }
+  // The slab: one voxel layer whose box spans z in [1.75, 2.0) m.
+  for (int x = 0; x < 16; ++x) {
+    for (int y = 0; y < 16; ++y) {
+      occupancy.setState(GridIndex3D{x, y, 7}, ObservedVoxelState::kOccupied);
+    }
+  }
+  const GridBounds3D bounds = occupancy.bounds();
+  WorldSnapshot3D world;
+  world.grid = EsdfGrid3D{.width = bounds.width_cells,
+                          .height = bounds.height_cells,
+                          .resolution_m = static_cast<float>(bounds.resolution_m),
+                          .origin_x_m = static_cast<float>(bounds.origin_x),
+                          .origin_y_m = static_cast<float>(bounds.origin_y),
+                          .depth = bounds.depth_cells,
+                          .origin_z_m = static_cast<float>(bounds.origin_z),
+                          .outside_is_unknown = false};
+  world.observed_occupancy = std::make_shared<ObservedOccupancyGrid3D>(occupancy);
+  std::vector<float> field(static_cast<std::size_t>(bounds.width_cells) *
+                               static_cast<std::size_t>(bounds.height_cells) *
+                               static_cast<std::size_t>(bounds.depth_cells),
+                           2.0F);
+  world.distances_m = std::make_shared<const std::vector<float>>(std::move(field));
+
+  SweptFootprintConfig footprint = pointFootprint();
+  footprint.body_radius_m = 0.0;
+  footprint.body_lower_extent_m = 0.35;
+  footprint.body_upper_extent_m = 0.35;
+  FiniteMotionHorizon3D horizon;
+  horizon.states = {
+      MotionState3D{.x = 2.0F, .y = 2.0F, .z = 1.0F},
+      MotionState3D{.x = 2.0F, .y = 3.0F, .z = 1.0F},
+  };
+
+  const auto measured = [&](const double allowance) {
+    const ExecutedHorizonClearance3D clearance = measureExecutedHorizonClearance3D(
+        horizon, 0U, world, footprint, 2.0, allowance);
+    EXPECT_TRUE(clearance.constrained()) << "allowance " << allowance;
+    return clearance.constrained_samples.front().body_clearance_m;
+  };
+
+  // 0.35 (body) + 0.50 (camera allowance) overruns the 0.40 m gap: the slab
+  // reads as body contact, which is the reference sitting at the departure
+  // floor.
+  EXPECT_DOUBLE_EQ(measured(0.5), 0.0);
+  // 0.35 + 0.34 leaves 0.06 m, a figure the 0.25 m grid cannot express: with
+  // the allowance rounded up to a whole cell this answer would still be 0.0.
+  EXPECT_NEAR(measured(0.34), 0.06, 1.0e-9);
+  // The allowance is the only difference between the three answers.
+  EXPECT_NEAR(measured(0.16), 0.24, 1.0e-9);
+}
+
 } // namespace
 } // namespace drone_city_nav

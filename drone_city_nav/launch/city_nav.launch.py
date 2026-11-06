@@ -25,6 +25,7 @@ from sensor_profile import (
     DEFAULT_CAMERA_PROFILE,
     DEFAULT_LOCALIZATION_PROFILES,
     DEFAULT_NAVIGATION_SENSOR_PROFILE,
+    LIDAR_VERTICAL_ERROR_OVERRIDES,
     STEREO_TOF_OBSERVABILITY,
     VISION_MEMORY_OVERRIDES,
     stereo_tof_topics,
@@ -433,6 +434,11 @@ def generate_launch_description():
         assert monitor_shutdown is not None
         mission_monitor_parameters.append({"shutdown_on_result": monitor_shutdown})
         cameras_mounted = cameras == "stereo_tof"
+        if navigation_sensors == "lidar":
+            # The height error the clearance law measures with belongs to the
+            # estimator that produces the height; the constant it carried was
+            # the camera's.
+            production_mppi_parameters.append(LIDAR_VERTICAL_ERROR_OVERRIDES)
         if navigation_sensors == "stereo_tof":
             production_mppi_parameters.append(STEREO_TOF_OBSERVABILITY)
             # The launch's one obstacle memory is the vision memory.

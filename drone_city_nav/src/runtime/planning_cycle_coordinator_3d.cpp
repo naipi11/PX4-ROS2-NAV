@@ -282,7 +282,8 @@ PlanningCycleCoordinator3D::measureResidentExecutionClearance(
                horizon->states.size() - 2U);
   const ExecutedHorizonClearance3D clearance = measureExecutedHorizonClearance3D(
       *horizon, first_remaining_state_index, *request.world, config_.physical_footprint,
-      config_.executed_horizon_constraint_clearance_m);
+      config_.executed_horizon_constraint_clearance_m,
+      config_.estimate_vertical_error_m);
   return clearance.available ? std::optional<ExecutedHorizonClearance3D>{clearance}
                              : std::nullopt;
 }
@@ -459,7 +460,8 @@ PlanningCycleCoordinator3D::prepare(const PlanningCycleRequest3D& request) {
                 route, output.route.projection.station_m,
                 config_.route_execution.latest_sensor_route_lookahead_m, *request.world,
                 config_.physical_footprint,
-                config_.executed_horizon_constraint_clearance_m)}
+                config_.executed_horizon_constraint_clearance_m,
+                config_.estimate_vertical_error_m)}
           : std::nullopt;
   output.route_clearance_ms =
       std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() -

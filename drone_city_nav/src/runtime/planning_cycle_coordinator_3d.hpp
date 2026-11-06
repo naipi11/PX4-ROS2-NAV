@@ -43,6 +43,12 @@ struct PlanningCycleCoordinatorConfig3D {
   // clearance at which the tube law admits exactly the cruise speed.
   SweptFootprintConfig physical_footprint{};
   double executed_horizon_constraint_clearance_m{0.75};
+  // K27's allowance: how far the estimate's height may sit from the truth, so
+  // the body's clearance is measured at, above and below the estimate and the
+  // least of the three answers. It belongs to the localization profile, not to
+  // the airframe: the constant's own measurement is the camera estimator's
+  // error, and a lidar profile that holds its height better needs less.
+  double estimate_vertical_error_m{kEstimateVerticalErrorM};
   std::string vehicle_id;
   std::size_t horizon_steps{0U};
   double route_constraint_diagnostics_distance_m{0.0};

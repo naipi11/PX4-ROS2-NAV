@@ -511,6 +511,15 @@ production_mppi_node:
     # r247 to r249 (2.47 to 2.54 m/s); at 2.5 on 62 to 83 percent of its own
     # ticks, 40 to 57 s of the flights r261 to r265 (2.52 to 2.83 m/s).
     tracking_error_tube_minimum_progress_speed_mps: 3.0
+    # K27's vertical allowance: the height error the body's clearance is
+    # measured with, so the body is measured where the estimate puts it and
+    # this much above and below, the least of the three. The figure belongs to
+    # the localization profile, not to the airframe. On the camera set it is
+    # the estimator's own measured error, 0.3 to 0.6 m and 0.57 m by the end of
+    # an ordinary flight (r1183), 0.5 m after 2.8 s of dead reckoning (r1184),
+    # 0.63 m after the light was lost (r1182): 0.5 m, as before this
+    # parameter existed.
+    estimate_vertical_error_m: 0.5
     mppi_footprint_clearance_broad_phase_enabled: true
     route_constraint_diagnostics_distance_m: 30.0
     # The vertical acceleration the horizon dynamics and the braking contract

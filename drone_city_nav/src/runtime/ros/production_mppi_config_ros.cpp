@@ -741,6 +741,15 @@ void ProductionMppiConfigLoader::declareControl() {
       declare<double>("tracking_error_tube_response_time_s", 0.15);
   control.tracking_error_tube.minimum_progress_speed_mps =
       declare<double>("tracking_error_tube_minimum_progress_speed_mps", 1.0);
+  // K27's allowance, owned by the localization profile: the height error the
+  // body's clearance is measured with. The default is the camera estimator's
+  // measured 0.5 m; a profile whose height is better held sets its own.
+  control.estimate_vertical_error_m =
+      declare<double>("estimate_vertical_error_m", kEstimateVerticalErrorM);
+  if (!(control.estimate_vertical_error_m >= 0.0) ||
+      !std::isfinite(control.estimate_vertical_error_m)) {
+    throw std::invalid_argument{"estimate_vertical_error_m must be finite and >= 0"};
+  }
   // The live clearance speed limit enforces the same tube law as the route
   // certification, so it shares the tube configuration.
   control.speed_policy.clearance_response_time_s =
@@ -865,6 +874,8 @@ void ProductionMppiConfigLoader::finalize() {
   // on it: the tracking-error tube law caps the speed there, and the same
   // tube configuration tells the planner how much.
   planning.persistent_planner.tracking_error_tube = control.tracking_error_tube;
+  planning.persistent_planner.estimate_vertical_error_m =
+      control.estimate_vertical_error_m;
   execution.stationary_hold_validity_ns = durationNanoseconds(
       execution.stationary_hold_validity_s, "stationary_hold_validity_s");
   execution.horizon_acknowledgement_grace_ns =

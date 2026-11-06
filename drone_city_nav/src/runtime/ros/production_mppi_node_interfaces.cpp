@@ -281,6 +281,7 @@ void ProductionMppiNode::initializeRuntimeInterfaces(
           .executed_horizon_constraint_clearance_m =
               config_.control.speed_policy.cruise_speed_mps *
               config_.control.tracking_error_tube.response_time_s,
+          .estimate_vertical_error_m = config_.control.estimate_vertical_error_m,
           .vehicle_id = config_.planning.vehicle_id,
           .horizon_steps = config_.control.mppi.steps,
           .route_constraint_diagnostics_distance_m =

@@ -81,6 +81,28 @@ TEST_F(ProductionMppiConfigTest, LoadsGroupedDefaultsAndDerivedContracts) {
   EXPECT_NE(config.execution.validation_policy, nullptr);
   EXPECT_EQ(config.diagnostics.rviz_period_ns, 100'000'000LL);
   EXPECT_EQ(config.diagnostics.topics.status, "/drone_city_nav/mppi/status");
+  // K27's allowance defaults to the camera estimator's measured 0.5 m and
+  // reaches both the speed policy's clearance law and the planner's departure
+  // test through one field.
+  EXPECT_DOUBLE_EQ(config.control.estimate_vertical_error_m, kEstimateVerticalErrorM);
+  EXPECT_DOUBLE_EQ(config.planning.persistent_planner.estimate_vertical_error_m,
+                   config.control.estimate_vertical_error_m);
+}
+
+TEST_F(ProductionMppiConfigTest, TakesTheProfilesOwnVerticalAllowance) {
+  // The figure belongs to the localization profile: a lidar flight can declare
+  // its own, and it has to reach the planner the same way.
+  const auto node = makeNode("production_mppi_config_vertical_allowance",
+                             {rclcpp::Parameter("estimate_vertical_error_m", 0.34)});
+  const ProductionMppiConfig config = declareProductionMppiConfig(*node);
+  EXPECT_DOUBLE_EQ(config.control.estimate_vertical_error_m, 0.34);
+  EXPECT_DOUBLE_EQ(config.planning.persistent_planner.estimate_vertical_error_m, 0.34);
+}
+
+TEST_F(ProductionMppiConfigTest, RejectsANegativeVerticalAllowance) {
+  const auto node = makeNode("production_mppi_config_vertical_negative",
+                             {rclcpp::Parameter("estimate_vertical_error_m", -0.1)});
+  EXPECT_THROW(declareProductionMppiConfig(*node), std::invalid_argument);
 }
 
 TEST_F(ProductionMppiConfigTest, AcceptsAVerticalBoundEqualToTheVerticalAcceleration) {

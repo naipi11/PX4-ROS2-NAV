@@ -172,6 +172,8 @@ struct ProductionMppiConfig final {
     NavigationAngularDerivativeConfig navigation_angular_derivative{};
     ConstrainedRouteControlConfig constrained_route{};
     TrackingErrorTubeConfig3D tracking_error_tube{};
+    // K27's vertical allowance, owned by the localization profile.
+    double estimate_vertical_error_m{kEstimateVerticalErrorM};
   };
 
   struct Diagnostics final {

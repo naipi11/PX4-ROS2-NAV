@@ -6,6 +6,35 @@ release names the asset tags it was validated with.
 
 ## Unreleased
 
+### K27's vertical allowance is the profile's own
+
+- The clearance law measures the body's clearance with the estimate's height
+  error on it (specification K27). That figure was one constant of 0.5 m for
+  every profile, and it was rounded up to whole evidence cells, so on a 0.25 m
+  grid every figure inside a cell collapsed to the same band. It is now a
+  parameter of the localization profile, and it is used as stated: the
+  clearance is measured against continuous voxel boxes, so no probe has to
+  fall on a cell boundary.
+- The camera set keeps 0.5 m, which is its estimator's own measured error (0.3
+  to 0.6 m, 0.57 m by the end of an ordinary flight, r1183 to r1184). The lidar
+  set takes 0.34 m, the one measured height error of the lidar-inertial
+  estimate (the offset it sat at near r3180's contact). Both figures now travel
+  through one path: the parameter `estimate_vertical_error_m`, the planning
+  coordinator, and the departure's approach test in the persistent planner.
+- Why it matters: r3400's 19.5 s at a 0.064 m/s median reference is the body
+  law pinning the reference while the envelope still admits motion (45 of 59
+  sampled ticks: body clearance under 0.05 m, envelope over 0.30 m). A ceiling
+  inside the 0.5 m band above the body reads as contact and holds the
+  reference at the contact-departure speed; the lidar's own 0.34 m band is
+  narrower.
+- Not established: no flight has flown this. The change moves a control input
+  on the lidar profile, so it needs the 5-lidar series before it can be called
+  accepted, and the r3400 slow interval itself cannot be replayed because its
+  local map and full route were never retained.
+- Regression: one geometry reports 0.0, 0.06 and 0.24 m of body clearance for
+  allowances of 0.50, 0.34 and 0.16 m; with the allowance rounded up to the
+  evidence grid the last two would both read 0.0.
+
 ### Deferred edge refinement resumes
 
 - A blocked level-zero edge whose waypoint fan stopped on the per-update probe

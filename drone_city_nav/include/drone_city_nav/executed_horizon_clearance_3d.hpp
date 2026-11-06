@@ -7,6 +7,7 @@
 #include "drone_city_nav/route_3d.hpp"
 #include "drone_city_nav/sensor_braking_contract_3d.hpp"
 #include "drone_city_nav/swept_footprint.hpp"
+#include "drone_city_nav/tracking_error_tube_config_3d.hpp"
 
 #include <cstddef>
 #include <limits>
@@ -96,7 +97,8 @@ struct ExecutedHorizonClearance3D {
 [[nodiscard]] ExecutedHorizonClearance3D measureExecutedHorizonClearance3D(
     const FiniteMotionHorizon3D& horizon, std::size_t first_remaining_state_index,
     const WorldSnapshot3D& world, const SweptFootprintConfig& footprint,
-    double constraint_clearance_m);
+    double constraint_clearance_m,
+    double estimate_vertical_error_m = kEstimateVerticalErrorM);
 
 // Route length from `from_station_m` to the start of the first route segment
 // whose body envelope reaches space the evidence has not observed, probing no
@@ -166,6 +168,7 @@ measureObservedRangeAlong3D(const ObservedOccupancyGrid3D& occupancy,
 measureRouteClearance3D(std::span<const RouteSample3D> route, double from_station_m,
                         double lookahead_m, const WorldSnapshot3D& world,
                         const SweptFootprintConfig& footprint,
-                        double constraint_clearance_m);
+                        double constraint_clearance_m,
+                        double estimate_vertical_error_m = kEstimateVerticalErrorM);
 
 } // namespace drone_city_nav

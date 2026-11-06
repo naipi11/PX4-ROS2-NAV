@@ -31,12 +31,17 @@ namespace {
 [[nodiscard]] double bodyClearanceM(const WorldSnapshot3D& world, const Point3& first,
                                     const Point3& second,
                                     const SweptFootprintConfig& footprint,
-                                    const double cap_m) {
-  const double resolution_m = static_cast<double>(world.grid.resolution_m);
-  const double error_m =
-      resolution_m > 0.0
-          ? std::ceil(kEstimateVerticalErrorM / resolution_m - 1.0e-9) * resolution_m
-          : kEstimateVerticalErrorM;
+                                    const double cap_m,
+                                    const double estimate_vertical_error_m) {
+  // K27's allowance is used as stated, not rounded up to whole evidence cells:
+  // the clearance is measured against continuous voxel boxes, so no part of
+  // the geometry needs the probes to fall on cell boundaries, and rounding up
+  // collapses every figure inside one cell to the same value — the camera's
+  // 0.5 m and the lidar's measured 0.34 m became one band on a 0.25 m grid.
+  // A profile that holds its height better than another must be able to say so.
+  const double error_m = std::isfinite(estimate_vertical_error_m)
+                             ? std::max(0.0, estimate_vertical_error_m)
+                             : 0.0;
   const double radius_m = footprint.body_radius_m;
   const double lower_extent_m = footprint.body_lower_extent_m + error_m;
   const double upper_extent_m = footprint.body_upper_extent_m + error_m;
@@ -96,7 +101,7 @@ namespace {
 ExecutedHorizonClearance3D measureExecutedHorizonClearance3D(
     const FiniteMotionHorizon3D& horizon, const std::size_t first_remaining_state_index,
     const WorldSnapshot3D& world, const SweptFootprintConfig& footprint,
-    const double constraint_clearance_m) {
+    const double constraint_clearance_m, const double estimate_vertical_error_m) {
   ExecutedHorizonClearance3D result;
   if (horizon.states.size() < 2U ||
       first_remaining_state_index + 1U >= horizon.states.size() ||
@@ -122,8 +127,9 @@ ExecutedHorizonClearance3D measureExecutedHorizonClearance3D(
         result.constrained_samples.push_back(ConstrainedHorizonSample3D{
             .distance_m = travelled_m,
             .clearance_m = clearance_m,
-            .body_clearance_m = bodyClearanceM(world, first, second, footprint,
-                                               constraint_clearance_m)});
+            .body_clearance_m =
+                bodyClearanceM(world, first, second, footprint, constraint_clearance_m,
+                               estimate_vertical_error_m)});
       }
     }
     travelled_m += segmentLength(first, second);
@@ -134,7 +140,8 @@ ExecutedHorizonClearance3D measureExecutedHorizonClearance3D(
 ExecutedHorizonClearance3D measureRouteClearance3D(
     const std::span<const RouteSample3D> route, const double from_station_m,
     const double lookahead_m, const WorldSnapshot3D& world,
-    const SweptFootprintConfig& footprint, const double constraint_clearance_m) {
+    const SweptFootprintConfig& footprint, const double constraint_clearance_m,
+    const double estimate_vertical_error_m) {
   ExecutedHorizonClearance3D result;
   if (route.size() < 2U || !std::isfinite(from_station_m) ||
       !std::isfinite(lookahead_m) || !(lookahead_m > 0.0) ||
@@ -159,8 +166,9 @@ ExecutedHorizonClearance3D measureRouteClearance3D(
         result.constrained_samples.push_back(ConstrainedHorizonSample3D{
             .distance_m = std::max(0.0, previous_station_m - from_station_m),
             .clearance_m = clearance_m,
-            .body_clearance_m = bodyClearanceM(world, previous, sample.position,
-                                               footprint, constraint_clearance_m)});
+            .body_clearance_m =
+                bodyClearanceM(world, previous, sample.position, footprint,
+                               constraint_clearance_m, estimate_vertical_error_m)});
       }
     }
     if (sample.station_m >= end_station_m) {

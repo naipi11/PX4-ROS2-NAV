@@ -63,6 +63,21 @@ VISION_MEMORY_OVERRIDES = {
     "hit_weight": 2,
 }
 
+# K27's vertical allowance on the lidar profile. The clearance law measures the
+# body's clearance with the estimate's height error on it, and the figure
+# belongs to the estimator that produces the height, not to the airframe: the
+# 0.5 m the law was built with is the camera estimator's own measured error
+# (0.3 to 0.6 m, 0.57 m by the end of an ordinary flight, r1183 to r1184). The
+# lidar profile inherited it although its one measured height error is the
+# 0.34 m the lidar-inertial estimate sat above the truth near r3180's contact.
+# A room whose ceiling lies inside a 0.5 m band above the body then reads as
+# contact and holds the reference at the contact-departure speed, which is the
+# shape of r3400's 19.5 s at 0.064 m/s. Set from that measurement; the whole
+# figure is unvalidated by flight, so any change of it needs a lidar series.
+LIDAR_VERTICAL_ERROR_OVERRIDES = {
+    "estimate_vertical_error_m": 0.34,
+}
+
 
 # The localization profile a flight flies when none is asked for: the
 # estimator the navigation sensors feed, and never GNSS.

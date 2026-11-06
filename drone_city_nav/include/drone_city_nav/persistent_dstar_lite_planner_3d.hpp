@@ -198,6 +198,11 @@ struct PersistentPlannerConfig3D {
   // a short tight passage and a longer open detour by the time each will
   // actually take. It never rejects an edge.
   TrackingErrorTubeConfig3D tracking_error_tube{};
+  // K27's vertical allowance, held exactly as the planning coordinator holds
+  // it: the departure's approach test measures the body's clearance with the
+  // estimate's height error on it, and the localization profile — not the
+  // airframe — owns the figure.
+  double estimate_vertical_error_m{kEstimateVerticalErrorM};
   SweptFootprintConfig physical_footprint{};
   // The body a departure is validated with: the legs leaving the vehicle,
   // the departure waypoints and the escape fill. A vehicle leaves a tight

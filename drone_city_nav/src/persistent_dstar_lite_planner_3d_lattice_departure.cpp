@@ -219,9 +219,13 @@ std::optional<Point3> PlannerLattice3D::saferDepartureWaypoint(
   if (!(threshold_m > 0.0)) {
     return std::nullopt;
   }
+  // Used as stated, for the same reason as the clearance law's: a figure below
+  // one evidence cell is a real figure, and rounding it up would give every
+  // profile inside that cell the same allowance.
   const double vertical_error_m =
-      std::ceil(kEstimateVerticalErrorM / raw_bounds_.resolution_m - 1.0e-9) *
-      raw_bounds_.resolution_m;
+      std::isfinite(config_->estimate_vertical_error_m)
+          ? std::max(0.0, config_->estimate_vertical_error_m)
+          : 0.0;
   const SweptFootprintConfig& footprint = config_->physical_footprint;
   const RawClearanceBody3D body{
       .radius_m = footprint.body_radius_m,
