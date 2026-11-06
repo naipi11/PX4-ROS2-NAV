@@ -312,6 +312,7 @@ add_drone_city_nav_layer(
   src/persistent_dstar_lite_planner_3d_lattice.cpp
   src/persistent_dstar_lite_planner_3d_lattice_departure.cpp
   src/persistent_dstar_lite_planner_3d_lattice_edge_cache.cpp
+  src/persistent_dstar_lite_planner_3d_lattice_refinement.cpp
   src/persistent_dstar_lite_planner_3d_lattice_ranking.cpp
   src/persistent_dstar_lite_planner_3d_path_postprocessor.cpp
   src/persistent_dstar_lite_planner_3d_search.cpp

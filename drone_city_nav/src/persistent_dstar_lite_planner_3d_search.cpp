@@ -528,13 +528,21 @@ void DStarLiteSession3D::scheduleAffectedVertices(
 
 void DStarLiteSession3D::scheduleSweepRejectedEdges() {
   for (const PersistentPlannerEdge3D& edge : lattice_->takeSweepRejectedEdges()) {
-    for (const PersistentPlannerNode3D node : {edge.first, edge.second}) {
-      if (node != start_ && node != goal_ && !records_.contains(node)) {
-        continue;
-      }
-      if (pending_repair_members_.insert(node).second) {
-        pending_repair_nodes_.push_back(node);
-      }
+    scheduleEdgeRepair(edge);
+  }
+}
+
+void DStarLiteSession3D::scheduleEdgeRepair(const PersistentPlannerEdge3D& edge) {
+  // Both endpoints are queued whether or not the search has a record for
+  // them. A blocked edge is exactly the one the backward search could not
+  // cross, so the endpoint on the far side usually has no record at all; it
+  // is the endpoint whose rhs the newly traversable edge can lower, and
+  // skipping it leaves the session with an empty open list and no way to
+  // learn that the wall opened. updateVertex computes the rhs from the
+  // successors it does have and enqueues the vertex when it moved.
+  for (const PersistentPlannerNode3D node : {edge.first, edge.second}) {
+    if (pending_repair_members_.insert(node).second) {
+      pending_repair_nodes_.push_back(node);
     }
   }
 }

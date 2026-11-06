@@ -394,14 +394,6 @@ public:
   [[nodiscard]] bool departureReachable(const Point3& start,
                                         std::span<const Point3> waypoints,
                                         const Point3& target) const;
-  // A short step off the straight segment between two node centres that clears
-  // the body on both legs, or nothing. The lattice steps 2 m horizontally
-  // against a 0.25 m map, so a doorway can be wide enough for the body and
-  // still admit no straight node-to-node segment. Both legs are validated by
-  // the ordinary raw rule, so this widens what the search can express, not
-  // what the body may touch.
-  [[nodiscard]] std::optional<Point3> refineBlockedEdge(PersistentPlannerNode3D first,
-                                                        PersistentPlannerNode3D second);
   // The waypoint of a refined edge, for path extraction. Empty unless the
   // edge's cached state still says refined.
   [[nodiscard]] std::optional<Point3>
@@ -602,6 +594,18 @@ public:
   [[nodiscard]] std::size_t adaptiveEdgeQueries() const noexcept;
   [[nodiscard]] std::size_t maximumQueriedLevel() const noexcept;
 
+  // Resumes the refinement fans a previous update's probe budget cut short.
+  // An edge whose straight sweep fails is cached blocked at once, so the
+  // search that priced it stays sound; the waypoints its fan had not reached
+  // may still clear the body, and an edge the cache calls blocked forever is
+  // an edge a route may need. Each fan keeps its place in the fan order, and
+  // one that clears the body promotes the edge to refined and is handed back
+  // through takePromotedEdges(), so the searches that priced it blocked can
+  // repair. Nothing unvalidated is ever admitted.
+  void retryDeferredRefinements(std::size_t maximum_probes,
+                                std::chrono::steady_clock::time_point deadline);
+  [[nodiscard]] std::vector<PersistentPlannerEdge3D> takePromotedEdges();
+
 private:
   const PersistentPlannerConfig3D* config_{nullptr};
   GridBounds3D raw_bounds_{};
@@ -665,6 +669,34 @@ private:
   // occupied evidence most edges fail: unbounded, the refinement takes the
   // whole compute budget and the search stops converging.
   std::size_t edge_refinement_probes_{0U};
+
+  // Blocked edges whose refinement stopped on that budget rather than on an
+  // exhausted fan, with the fan index each resumes at. Queued in the order
+  // they were met and resumed from the front, so one update's truncation
+  // cannot starve the edges behind it. Bounded: an edge that does not fit
+  // stays blocked on this world, as every such edge did before.
+  struct DeferredRefinement3D {
+    PersistentPlannerEdge3D edge{};
+    std::size_t next_probe{0U};
+  };
+
+  static constexpr std::size_t kMaximumDeferredRefinements{4096U};
+  std::deque<DeferredRefinement3D> deferred_refinements_;
+  std::unordered_set<PersistentPlannerEdge3D, PersistentPlannerEdge3DHash>
+      deferred_refinement_members_;
+  // Edges a resumed fan promoted from blocked to refined, waiting for the
+  // owner to repair the searches that priced them blocked.
+  std::vector<PersistentPlannerEdge3D> promoted_edges_;
+  // One pass of a blocked edge's waypoint fan, resuming at `next_probe`:
+  // returns the first candidate both legs clear the body through, advances
+  // `next_probe` past every candidate examined, and reports whether the fan
+  // is exhausted rather than cut short by `probe_limit`.
+  [[nodiscard]] std::optional<Point3>
+  probeRefinementFan(PersistentPlannerNode3D first, PersistentPlannerNode3D second,
+                     std::size_t& next_probe, std::size_t& probes_spent,
+                     std::size_t probe_limit, bool& fan_exhausted);
+  void deferRefinement(const PersistentPlannerEdge3D& edge, std::size_t next_probe);
+  void forgetDeferredRefinement(const PersistentPlannerEdge3D& edge);
 
   struct CachedNodeClearance {
     double clearance_m{0.0};
@@ -825,6 +857,11 @@ public:
   // the last call: a label priced through such an edge is stale, and the
   // change scheduling never sees a rejection the sweep made on a candidate.
   void scheduleSweepRejectedEdges();
+  // Queues repair for the two endpoints of an edge whose cost fell from
+  // blocked to traversable after a deferred refinement finished. A label
+  // priced through the edge while it was blocked is stale exactly as after a
+  // rejection, and the repair is the same one.
+  void scheduleEdgeRepair(const PersistentPlannerEdge3D& edge);
   void scheduleMovedClearances();
   [[nodiscard]] bool shortestPathComplete();
   [[nodiscard]] bool computeShortestPath(std::chrono::steady_clock::time_point deadline,

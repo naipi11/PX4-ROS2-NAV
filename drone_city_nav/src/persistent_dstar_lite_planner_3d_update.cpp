@@ -580,6 +580,32 @@ PersistentDStarLitePlanner3DImpl::plan(const PersistentPlannerRequest3D& request
       dstar_session_.pendingRepairNodes() > 0U && deadline > repair_started
           ? repair_started + repair_share
           : repair_started;
+  // A fan an earlier update's probe budget cut short resumes here, before the
+  // repair that consumes its outcome: an edge it promotes is as stale as a
+  // change-repriced one, and the same repair pass repairs it. The probes are
+  // one update's refinement allowance, so a resumed fan costs what a fresh
+  // one would.
+  lattice_.retryDeferredRefinements(config_.maximum_edge_refinement_probes,
+                                    repair_started + repair_share);
+  const std::vector<PersistentPlannerEdge3D> promoted = lattice_.takePromotedEdges();
+  for (const PersistentPlannerEdge3D& edge : promoted) {
+    dstar_session_.scheduleEdgeRepair(edge);
+  }
+  if (!promoted.empty()) {
+    // A promoted edge is a connection the searches had already given up on:
+    // the feasibility search had marked the vehicle's component closed, and
+    // on an unchanged world it will not run again. Clearing the mark is what
+    // lets it walk through the door the resumed fan opened; the labels and
+    // the anchor are kept, so the walk continues rather than starting over.
+    feasibility_search_.clearClosedComponent();
+    closed_component_origin_.reset();
+    closed_component_updates_ = 0U;
+    // The escape fill and the chain it found answered the same closed
+    // component; both are stale now.
+    escape_search_.reset();
+    escape_search_pending_ = false;
+    escape_connection_.reset();
+  }
   static_cast<void>(dstar_session_.continueAffectedVertexRepair(
       repair_deadline, config_.maximum_expansions_per_update,
       telemetry.repair_lattice_states_processed));

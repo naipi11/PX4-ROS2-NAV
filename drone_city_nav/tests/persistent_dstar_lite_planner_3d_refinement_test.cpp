@@ -197,6 +197,111 @@ TEST(PersistentDStarLitePlanner3DTest, ARejectedSegmentNamesTheEdgeThatAdmittedI
   EXPECT_TRUE(lattice.takeSweepRejectedEdges().empty());
 }
 
+TEST(PersistentDStarLitePlanner3DTest,
+     ARefinementTheProbeBudgetCutShortResumesOnALaterUpdate) {
+  // The probe budget is per update, and near occupied evidence a search meets
+  // more blocked edges than the budget can fan out. An edge whose fan stopped
+  // on the budget was cached blocked for the life of the world, so a doorway
+  // the budget reached too late stayed shut however long the vehicle waited:
+  // the frozen r3510 revision 3520 probe found no route in 300 updates at the
+  // 256-probe budget while the same map yielded a raw-valid route at a budget
+  // large enough to finish the fans. The cut-short fan has to resume.
+  RefinedDoorwayFixture fixture;
+  fixture.config.maximum_edge_refinement_probes = 1U;
+  detail::PlannerLattice3D lattice{fixture.config};
+  const PersistentPlannerWorld3D initial = world(fixture.occupancy, 1U);
+  lattice.configureGridGeometry(*initial.bounds());
+  lattice.installWorld(initial);
+
+  // A row the wall blocks completely: its whole fan is tried and clears
+  // nothing, and with one probe per update it is cut short on the first pass.
+  const detail::PersistentPlannerNode3D blocked_west{3, 0, 1};
+  const detail::PersistentPlannerNode3D blocked_east{4, 0, 1};
+  lattice.beginEdgeRefinementBudget();
+  EXPECT_FALSE(std::isfinite(lattice.rankedEdgeCost(blocked_west, blocked_east)))
+      << "the fixture row no longer passes through the wall";
+  // The budget is spent, so the doorway's own fan cannot start: it is cached
+  // blocked with a cursor, not blocked forever.
+  EXPECT_FALSE(
+      std::isfinite(lattice.rankedEdgeCost(fixture.door_west, fixture.door_east)));
+  EXPECT_FALSE(lattice.edgeWaypoint(fixture.door_west, fixture.door_east).has_value());
+
+  bool promoted = false;
+  for (int update = 0; update < 8 && !promoted; ++update) {
+    lattice.beginEdgeRefinementBudget();
+    lattice.retryDeferredRefinements(fixture.config.maximum_edge_refinement_probes,
+                                     std::chrono::steady_clock::time_point::max());
+    for (const detail::PersistentPlannerEdge3D& edge : lattice.takePromotedEdges()) {
+      promoted = promoted ||
+                 edge == detail::canonicalEdge(fixture.door_west, fixture.door_east);
+    }
+  }
+  ASSERT_TRUE(promoted) << "a fan the budget cut short was never resumed";
+  const std::optional<Point3> waypoint =
+      lattice.edgeWaypoint(fixture.door_west, fixture.door_east);
+  ASSERT_TRUE(waypoint.has_value());
+  EXPECT_NEAR(waypoint->x, 8.0, 1.0e-9);
+  EXPECT_NEAR(waypoint->y, 3.5, 1.0e-9);
+  EXPECT_TRUE(
+      std::isfinite(lattice.rankedEdgeCost(fixture.door_west, fixture.door_east)));
+  // Every candidate the fan tried cleared the body on both legs, so the
+  // promoted edge is one the sweep admits.
+  const Point3 west = lattice.pointFor(fixture.door_west);
+  const Point3 east = lattice.pointFor(fixture.door_east);
+  EXPECT_TRUE(lattice.pathTraversable({west, *waypoint, east}));
+}
+
+TEST(PersistentDStarLitePlanner3DTest,
+     AStalledFanBlockedEdgeStaysBlockedWhenEveryCandidateWasTried) {
+  // The resume must not turn a fan that was tried whole into a search that
+  // keeps re-probing the same candidates: an edge whose every waypoint the
+  // sweep refuses is exhausted once and then left alone.
+  RefinedDoorwayFixture fixture;
+  fixture.config.maximum_edge_refinement_probes = 1U;
+  detail::PlannerLattice3D lattice{fixture.config};
+  const PersistentPlannerWorld3D initial = world(fixture.occupancy, 1U);
+  lattice.configureGridGeometry(*initial.bounds());
+  lattice.installWorld(initial);
+  const detail::PersistentPlannerNode3D blocked_west{3, 0, 1};
+  const detail::PersistentPlannerNode3D blocked_east{4, 0, 1};
+  EXPECT_FALSE(std::isfinite(lattice.rankedEdgeCost(blocked_west, blocked_east)));
+  for (int update = 0; update < 12; ++update) {
+    lattice.beginEdgeRefinementBudget();
+    lattice.retryDeferredRefinements(fixture.config.maximum_edge_refinement_probes,
+                                     std::chrono::steady_clock::time_point::max());
+    EXPECT_TRUE(lattice.takePromotedEdges().empty())
+        << "a fully refused fan was promoted on update " << update;
+  }
+  EXPECT_FALSE(std::isfinite(lattice.rankedEdgeCost(blocked_west, blocked_east)));
+}
+
+TEST(PersistentDStarLitePlanner3DTest, APlannerWhoseBudgetStopsAFanStillOpensADoorway) {
+  // The same doorway, asked of the planner with a budget smaller than one
+  // fan: the 3-offset fan is twelve candidates, so a search that meets more
+  // blocked edges than the budget can fan out leaves most of them cut short.
+  // Before the resume every such edge was cached blocked for the life of the
+  // world. The route has to exist anyway, however many updates it takes: the
+  // fan resumes where it stopped.
+  RefinedDoorwayFixture fixture;
+  fixture.config.maximum_edge_refinement_probes = 8U;
+  PersistentDStarLitePlanner3D planner{fixture.config};
+  const PersistentPlannerRequest3D req =
+      request(fixture.start, fixture.goal, world(fixture.occupancy, 1U));
+  PlannerUpdate3D update;
+  int updates = 0;
+  for (; updates < 400; ++updates) {
+    update = planner.plan(req);
+    if (update.publishable()) {
+      break;
+    }
+  }
+  ASSERT_TRUE(update.publishable())
+      << "a budget below one fan never opened the doorway in " << updates
+      << " updates: input=" << static_cast<int>(update.input_status);
+  expectRawValid(candidate(update).points, *fixture.occupancy,
+                 planner.config().physical_footprint);
+}
+
 TEST(PersistentDStarLitePlanner3DTest, APathIsAcceptedOnlyAsItsRoutePiecesClear) {
   // A plate over a street, z in [7.75, 8.0), and a segment descending past
   // its edge that the body barely clears. Swept whole it passes; cut into the pieces

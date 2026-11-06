@@ -99,6 +99,7 @@ bool PlannerLattice3D::forgetEdgeCost(const PersistentPlannerEdge3D& edge) {
       return false;
     }
     setLevelZeroState(slot, kLevelZeroEdgeUnknown);
+    forgetDeferredRefinement(canonical);
     forgetRefinedWaypoint(canonical);
     return true;
   }
@@ -136,6 +137,7 @@ bool PlannerLattice3D::forgetEdgeCostForChange(const PersistentPlannerEdge3D& ed
       return false;
     }
     setLevelZeroState(slot, kLevelZeroEdgeUnknown);
+    forgetDeferredRefinement(canonicalEdge(edge.first, edge.second));
     if (state == kLevelZeroEdgeRefined) {
       forgetRefinedWaypoint(canonicalEdge(edge.first, edge.second));
     }
@@ -181,6 +183,7 @@ bool PlannerLattice3D::forgetNodeEdgesForChange(const PersistentPlannerNode3D no
             (state == kLevelZeroEdgeBlocked && occupied_cell_removed);
         if (movable) {
           setLevelZeroState(slot, kLevelZeroEdgeUnknown);
+          forgetDeferredRefinement(edge);
           if (state == kLevelZeroEdgeRefined) {
             forgetRefinedWaypoint(edge);
           }

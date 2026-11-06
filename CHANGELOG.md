@@ -6,6 +6,38 @@ release names the asset tags it was validated with.
 
 ## Unreleased
 
+### Deferred edge refinement resumes
+
+- A blocked level-zero edge whose waypoint fan stopped on the per-update probe
+  budget is no longer cached blocked for the life of the world. The fan keeps
+  its position in the fan order, is queued with the candidate it had reached,
+  and the queue is resumed from the front on later updates with the same
+  per-update allowance, an even share per edge so no fan starves the ones
+  behind it. A fan whose every candidate the raw sweep refused stays blocked
+  exactly as before, and nothing unvalidated is ever admitted: a promoted edge
+  is one both of whose legs the ordinary raw swept-body rule cleared.
+- A promotion now reaches the searches that priced the edge blocked. The
+  persistent session queues both endpoints for repair whether or not it holds
+  a record for them — a blocked edge is exactly the one the backward search
+  could not cross, so the far endpoint usually has none and skipping it left
+  the session with an empty open list and no way to learn that the wall had
+  opened — and the feasibility search clears the component it had marked
+  closed, which it otherwise reopens only when the world changes or the
+  vehicle moves.
+- Offline evidence on r3510's exact recorded raw revision 3520, same binary
+  and same request: the frozen-world probe found no goal candidate in 300
+  updates at the deployed 256-probe budget, and a raw-sweep-clear 83-point
+  candidate at update 156 with the probe budget raised to 1,000,000. Both
+  runs are static map searches with no latest sensor, controller response or
+  flight; the higher-budget run is not a counterfactual flight and neither
+  establishes that the original live r3510 had a routable world. The candidate
+  re-checked at 0.5 m pieces covers 536 pieces with no envelope or upright-body
+  rejection, 262.9 m long, 0.0 m from the goal.
+- Regressions: a fan cut short by a one-probe budget resumes and promotes the
+  doorway on a later update while a fan tried whole stays blocked; and a
+  planner whose budget is smaller than one fan opens the same doorway through
+  the persistent session, which was the end-to-end case that failed before.
+
 ### Stereo border-search support
 
 - Recheck existing stereo returns in the near matcher's unsupported left

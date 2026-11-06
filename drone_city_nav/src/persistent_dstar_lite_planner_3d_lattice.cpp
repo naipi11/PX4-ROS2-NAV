@@ -499,64 +499,6 @@ bool PlannerLattice3D::edgeRefinementBudgetRemaining() const noexcept {
 }
 
 std::optional<Point3>
-PlannerLattice3D::refineBlockedEdge(const PersistentPlannerNode3D first,
-                                    const PersistentPlannerNode3D second) {
-  if (config_->edge_refinement_offsets == 0U || !edgeRefinementBudgetRemaining()) {
-    return std::nullopt;
-  }
-  const Point3 first_point = pointFor(first);
-  const Point3 second_point = pointFor(second);
-  const Vec3 along{second_point.x - first_point.x, second_point.y - first_point.y,
-                   second_point.z - first_point.z};
-  const double length =
-      std::sqrt(along.x * along.x + along.y * along.y + along.z * along.z);
-  if (!(length > 1.0e-6)) {
-    return std::nullopt;
-  }
-  const Vec3 unit{along.x / length, along.y / length, along.z / length};
-  // Two directions across the edge: one horizontal, one carrying whatever
-  // vertical freedom the edge leaves. A doorway is missed across the edge, not
-  // along it.
-  const double horizontal_length = std::hypot(unit.x, unit.y);
-  const Vec3 lateral =
-      horizontal_length > 1.0e-6
-          ? Vec3{-unit.y / horizontal_length, unit.x / horizontal_length, 0.0}
-          : Vec3{1.0, 0.0, 0.0};
-  const Vec3 vertical{lateral.y * unit.z - lateral.z * unit.y,
-                      lateral.z * unit.x - lateral.x * unit.z,
-                      lateral.x * unit.y - lateral.y * unit.x};
-  const Point3 middle{0.5 * (first_point.x + second_point.x),
-                      0.5 * (first_point.y + second_point.y),
-                      0.5 * (first_point.z + second_point.z)};
-  const auto offsets = static_cast<int>(config_->edge_refinement_offsets);
-  const double step_m =
-      config_->minimum_horizontal_step_m / static_cast<double>(offsets + 1);
-  // Nearest first: the shortest detour that clears the body wins.
-  for (int magnitude = 1; magnitude <= offsets; ++magnitude) {
-    const double distance_m = static_cast<double>(magnitude) * step_m;
-    for (const Vec3& axis : {lateral, vertical}) {
-      for (const double sign : {1.0, -1.0}) {
-        const Point3 waypoint{middle.x + sign * distance_m * axis.x,
-                              middle.y + sign * distance_m * axis.y,
-                              middle.z + sign * distance_m * axis.z};
-        if (!pointInsideFlightEnvelope(waypoint)) {
-          continue;
-        }
-        if (!edgeRefinementBudgetRemaining()) {
-          return std::nullopt;
-        }
-        ++edge_refinement_probes_;
-        if (routePiecesValid(first_point, waypoint) &&
-            routePiecesValid(waypoint, second_point)) {
-          return waypoint;
-        }
-      }
-    }
-  }
-  return std::nullopt;
-}
-
-std::optional<Point3>
 PlannerLattice3D::edgeWaypoint(const PersistentPlannerNode3D first,
                                const PersistentPlannerNode3D second) const {
   if (!nodeInside(first) || !nodeInside(second) || first == second ||
@@ -767,21 +709,30 @@ double PlannerLattice3D::rawEdgeCost(const PersistentPlannerNode3D first,
         if (routePiecesValid(pointFor(first), pointFor(second))) {
           state = kLevelZeroEdgeClear;
           setLevelZeroState(slot, state);
-        } else if (const std::optional<Point3> waypoint =
-                       refineBlockedEdge(edge.first, edge.second);
-                   waypoint.has_value()) {
-          rememberRefinedWaypoint(edge, *waypoint);
-          state = kLevelZeroEdgeRefined;
-          setLevelZeroState(slot, state);
         } else {
-          // The straight sweep answered: this edge is blocked. Refinement is an
-          // opportunistic upgrade on top of that answer, so an edge the probe
-          // budget could not reach is cached blocked exactly as it was before
-          // refinement existed. Leaving it unknown instead would re-run the
-          // straight sweep on every later query in the same update, and a
-          // search that revalidates the same edges cannot converge inside its
-          // budget.
-          state = kLevelZeroEdgeBlocked;
+          // The straight sweep answered: this edge is blocked, and the
+          // waypoint fan is an opportunistic upgrade on top of that answer.
+          // Leaving the edge unknown instead would re-run the straight sweep
+          // on every later query in the same update, and a search that
+          // revalidates the same edges cannot converge inside its budget. A
+          // fan the update's budget cut short is queued to resume on a later
+          // update, so an edge the budget reached too late is not cached
+          // blocked for the life of the world; one whose whole fan was tried
+          // stays blocked, as it always did.
+          std::size_t next_probe{0U};
+          bool fan_exhausted{false};
+          const std::optional<Point3> waypoint = probeRefinementFan(
+              edge.first, edge.second, next_probe, edge_refinement_probes_,
+              config_->maximum_edge_refinement_probes, fan_exhausted);
+          if (waypoint.has_value()) {
+            rememberRefinedWaypoint(edge, *waypoint);
+            state = kLevelZeroEdgeRefined;
+          } else {
+            if (!fan_exhausted) {
+              deferRefinement(edge, next_probe);
+            }
+            state = kLevelZeroEdgeBlocked;
+          }
           setLevelZeroState(slot, state);
         }
       }
@@ -1032,6 +983,12 @@ void PlannerLattice3D::resetEdgeEvidence() noexcept {
   resetNodeClearances();
   node_placements_.clear();
   adaptive_edges_by_chunk_.clear();
+  // A resumed fan belongs to the world its straight sweep ran on; a bulk
+  // clear re-derives every edge, so the cursors and the promotions they would
+  // report are gone with the states they would have promoted.
+  deferred_refinements_.clear();
+  deferred_refinement_members_.clear();
+  promoted_edges_.clear();
   resetEdgeStatistics();
 }
 
