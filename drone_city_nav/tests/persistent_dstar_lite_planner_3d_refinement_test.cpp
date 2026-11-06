@@ -275,6 +275,48 @@ TEST(PersistentDStarLitePlanner3DTest,
   EXPECT_FALSE(std::isfinite(lattice.rankedEdgeCost(blocked_west, blocked_east)));
 }
 
+TEST(PersistentDStarLitePlanner3DTest,
+     AResumedFanBehindAnExpiredDeadlineSpendsNothingAndKeepsItsPlace) {
+  // The resumed fan runs outside any search, so the probe budget would be its
+  // only bound: two raw swept-body validations near evidence are milliseconds
+  // each and a budget of hundreds inside one fan is the whole update. A fan
+  // whose deadline has passed must spend nothing, promote nothing, and keep
+  // its place for the next update.
+  RefinedDoorwayFixture fixture;
+  fixture.config.maximum_edge_refinement_probes = 1U;
+  detail::PlannerLattice3D lattice{fixture.config};
+  const PersistentPlannerWorld3D initial = world(fixture.occupancy, 1U);
+  lattice.configureGridGeometry(*initial.bounds());
+  lattice.installWorld(initial);
+  const detail::PersistentPlannerNode3D blocked_west{3, 0, 1};
+  const detail::PersistentPlannerNode3D blocked_east{4, 0, 1};
+  lattice.beginEdgeRefinementBudget();
+  ASSERT_FALSE(std::isfinite(lattice.rankedEdgeCost(blocked_west, blocked_east)));
+  ASSERT_FALSE(
+      std::isfinite(lattice.rankedEdgeCost(fixture.door_west, fixture.door_east)));
+
+  lattice.retryDeferredRefinements(fixture.config.maximum_edge_refinement_probes,
+                                   std::chrono::steady_clock::now() -
+                                       std::chrono::milliseconds{1});
+  EXPECT_TRUE(lattice.takePromotedEdges().empty())
+      << "a fan behind an expired deadline promoted an edge";
+  EXPECT_FALSE(lattice.edgeWaypoint(fixture.door_west, fixture.door_east).has_value());
+
+  // The queue survived, so a later update with a real deadline still finds
+  // the doorway.
+  bool promoted = false;
+  for (int update = 0; update < 8 && !promoted; ++update) {
+    lattice.beginEdgeRefinementBudget();
+    lattice.retryDeferredRefinements(fixture.config.maximum_edge_refinement_probes,
+                                     std::chrono::steady_clock::time_point::max());
+    for (const detail::PersistentPlannerEdge3D& edge : lattice.takePromotedEdges()) {
+      promoted = promoted ||
+                 edge == detail::canonicalEdge(fixture.door_west, fixture.door_east);
+    }
+  }
+  EXPECT_TRUE(promoted) << "the expired pass discarded the fan instead of keeping it";
+}
+
 TEST(PersistentDStarLitePlanner3DTest, APlannerWhoseBudgetStopsAFanStillOpensADoorway) {
   // The same doorway, asked of the planner with a budget smaller than one
   // fan: the 3-offset fan is twelve candidates, so a search that meets more

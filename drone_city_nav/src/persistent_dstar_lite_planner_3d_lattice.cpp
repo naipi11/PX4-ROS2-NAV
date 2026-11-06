@@ -721,9 +721,13 @@ double PlannerLattice3D::rawEdgeCost(const PersistentPlannerNode3D first,
           // stays blocked, as it always did.
           std::size_t next_probe{0U};
           bool fan_exhausted{false};
+          // The fresh path keeps its old bound: the probe budget, and the
+          // search's own deadline between expansions. Only the resumed path,
+          // which runs outside any search, needs a clock of its own.
           const std::optional<Point3> waypoint = probeRefinementFan(
               edge.first, edge.second, next_probe, edge_refinement_probes_,
-              config_->maximum_edge_refinement_probes, fan_exhausted);
+              config_->maximum_edge_refinement_probes,
+              std::chrono::steady_clock::time_point::max(), fan_exhausted);
           if (waypoint.has_value()) {
             rememberRefinedWaypoint(edge, *waypoint);
             state = kLevelZeroEdgeRefined;

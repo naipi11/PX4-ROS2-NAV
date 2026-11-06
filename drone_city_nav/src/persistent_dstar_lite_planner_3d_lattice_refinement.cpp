@@ -18,7 +18,7 @@ namespace drone_city_nav::detail {
 std::optional<Point3> PlannerLattice3D::probeRefinementFan(
     const PersistentPlannerNode3D first, const PersistentPlannerNode3D second,
     std::size_t& next_probe, std::size_t& probes_spent, const std::size_t probe_limit,
-    bool& fan_exhausted) {
+    const std::chrono::steady_clock::time_point deadline, bool& fan_exhausted) {
   fan_exhausted = false;
   const auto offsets = static_cast<std::size_t>(config_->edge_refinement_offsets);
   if (offsets == 0U) {
@@ -62,7 +62,12 @@ std::optional<Point3> PlannerLattice3D::probeRefinementFan(
   // budget cut short resumes at the same candidate rather than starting the
   // fan again.
   while (next_probe < total_probes) {
-    if (probes_spent >= probe_limit) {
+    // The probe budget bounds the sweeps, not their cost: two raw swept-body
+    // validations near evidence are milliseconds each, and a budget of
+    // hundreds spent inside one fan is the whole update. The fan stops when
+    // the update's deadline passes, exactly as the search stages around it
+    // do, and keeps its cursor.
+    if (probes_spent >= probe_limit || std::chrono::steady_clock::now() >= deadline) {
       return std::nullopt;
     }
     const std::size_t magnitude = next_probe / 4U + 1U;
@@ -148,7 +153,7 @@ void PlannerLattice3D::retryDeferredRefinements(
     std::size_t edge_spent{0U};
     const std::optional<Point3> waypoint =
         probeRefinementFan(item.edge.first, item.edge.second, item.next_probe,
-                           edge_spent, per_edge_limit, fan_exhausted);
+                           edge_spent, per_edge_limit, deadline, fan_exhausted);
     spent += edge_spent;
     if (waypoint.has_value()) {
       rememberRefinedWaypoint(item.edge, *waypoint);

@@ -33,10 +33,17 @@ release names the asset tags it was validated with.
   establishes that the original live r3510 had a routable world. The candidate
   re-checked at 0.5 m pieces covers 536 pieces with no envelope or upright-body
   rejection, 262.9 m long, 0.0 m from the goal.
+- The resumed pass runs outside any search, so the probe budget alone would
+  bound it: two raw swept-body validations near evidence are milliseconds
+  each. Each resumed fan therefore also stops at the update's repair deadline,
+  which is the same deadline the search stages around it use, and keeps its
+  cursor when it does.
 - Regressions: a fan cut short by a one-probe budget resumes and promotes the
-  doorway on a later update while a fan tried whole stays blocked; and a
-  planner whose budget is smaller than one fan opens the same doorway through
-  the persistent session, which was the end-to-end case that failed before.
+  doorway on a later update while a fan tried whole stays blocked; a fan
+  behind an already expired deadline spends nothing, promotes nothing and
+  keeps its place; and a planner whose budget is smaller than one fan opens
+  the same doorway through the persistent session, which was the end-to-end
+  case that failed before.
 
 ### Stereo border-search support
 

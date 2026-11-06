@@ -691,10 +691,10 @@ private:
   // returns the first candidate both legs clear the body through, advances
   // `next_probe` past every candidate examined, and reports whether the fan
   // is exhausted rather than cut short by `probe_limit`.
-  [[nodiscard]] std::optional<Point3>
-  probeRefinementFan(PersistentPlannerNode3D first, PersistentPlannerNode3D second,
-                     std::size_t& next_probe, std::size_t& probes_spent,
-                     std::size_t probe_limit, bool& fan_exhausted);
+  [[nodiscard]] std::optional<Point3> probeRefinementFan(
+      PersistentPlannerNode3D first, PersistentPlannerNode3D second,
+      std::size_t& next_probe, std::size_t& probes_spent, std::size_t probe_limit,
+      std::chrono::steady_clock::time_point deadline, bool& fan_exhausted);
   void deferRefinement(const PersistentPlannerEdge3D& edge, std::size_t next_probe);
   void forgetDeferredRefinement(const PersistentPlannerEdge3D& edge);
 
