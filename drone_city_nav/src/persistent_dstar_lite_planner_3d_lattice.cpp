@@ -715,9 +715,9 @@ double PlannerLattice3D::rawEdgeCost(const PersistentPlannerNode3D first,
           // Leaving the edge unknown instead would re-run the straight sweep
           // on every later query in the same update, and a search that
           // revalidates the same edges cannot converge inside its budget.
-          // A fan the update's budget cut short is queued to resume on a later
-          // update while capacity remains. If the queue is full, this edge
-          // remains cached blocked; a fan tried whole stays blocked as well.
+          // A fan the update's budget cut short resumes on a later update;
+          // overflow is retained compactly and starts again on the current
+          // world. A fan tried whole stays blocked.
           std::size_t next_probe{0U};
           bool fan_exhausted{false};
           // The fresh path keeps its old bound: the probe budget, and the
@@ -991,6 +991,9 @@ void PlannerLattice3D::resetEdgeEvidence() noexcept {
   // report are gone with the states they would have promoted.
   deferred_refinements_.clear();
   deferred_refinement_members_.clear();
+  deferred_overflow_.clear();
+  deferred_overflow_count_ = 0U;
+  deferred_overflow_cursor_ = 0U;
   promoted_edges_.clear();
   resetEdgeStatistics();
 }

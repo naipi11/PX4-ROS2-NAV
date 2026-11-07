@@ -60,10 +60,15 @@ release names the asset tags it was validated with.
 ### Deferred edge refinement resumes
 
 - A level-zero edge whose waypoint fan stops on the per-update probe budget is
-  queued for later refinement while capacity remains. The queue is capped at
-  4096 edges; additional truncated fans still remain cached blocked. A
-  promoted waypoint must pass the ordinary raw swept-body checks. This is a
-  bounded mitigation, not a guarantee that every deferred edge is retried.
+  queued for later refinement. The active queue remains capped at 4096 edges;
+  overflow is retained as a lazily allocated 16-bit mask per lattice node and
+  admitted as space becomes available. Overflowed fans restart from the first
+  waypoint on the current world, so neither a discarded cursor nor stale
+  evidence can admit an unchecked route. A zero probe budget defers no fans.
+- A synthetic doorway behind 4096 blocked edges failed with the old queue cap
+  and now opens; the regression also covers an expired deadline and a world
+  change while the doorway is in overflow. The queue scan obeys the repair
+  deadline, so a large sparse overflow can require multiple updates.
 - A queued fan restarts its candidate cursor when changed occupied evidence
   touches the region containing its possible waypoint legs. Without that, a
   previously blocked waypoint could become clear while the old cursor skipped

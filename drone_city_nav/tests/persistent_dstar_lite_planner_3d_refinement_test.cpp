@@ -157,6 +157,87 @@ TEST(PersistentDStarLitePlanner3DTest,
   EXPECT_TRUE(lattice.pathTraversable({west, *waypoint, east}));
 }
 
+void expectOverflowedDoorwayFanEventuallyOpens(const bool change_world) {
+  RefinedDoorwayFixture fixture;
+  fixture.config.maximum_edge_refinement_probes = 1U;
+  constexpr int kHeight = 4096;
+  auto occupancy = std::make_shared<ObservedOccupancyGrid3D>(
+      GridBounds3D{0.0, 0.0, 0.0, 0.25, 64, kHeight, 16});
+  // The door is far beyond the wall edges used to fill the active queue.
+  for (int y = 0; y < kHeight; ++y) {
+    const double position = static_cast<double>(y) * 0.25;
+    if (position >= 1020.75 && position < 1022.25) {
+      continue;
+    }
+    for (int z = 0; z < 16; ++z) {
+      ASSERT_TRUE(occupancy->setState({32, y, z}, ObservedVoxelState::kOccupied));
+    }
+  }
+  std::vector<GridIndex3D> changed_cells;
+  if (change_world) {
+    for (GridIndex3D cell : RefinedDoorwayFixture::cellsAboveTheUpperWaypoint()) {
+      cell.y += 4072;
+      ASSERT_TRUE(occupancy->setState(cell, ObservedVoxelState::kOccupied));
+      changed_cells.push_back(cell);
+    }
+    fixture.config.clearance_ranking_distance_m = 0.0;
+  }
+  detail::PlannerLattice3D lattice{fixture.config};
+  const PersistentPlannerWorld3D initial = world(occupancy, 1U);
+  lattice.configureGridGeometry(*initial.bounds());
+  lattice.installWorld(initial);
+  lattice.beginEdgeRefinementBudget();
+  std::size_t blocked = 0U;
+  for (int y = 1; y < 500 && blocked < 4096U; ++y) {
+    for (int z = 0; z < 2 && blocked < 4096U; ++z) {
+      for (int dy = -1; dy <= 1 && blocked < 4096U; ++dy) {
+        for (int other_z = 0; other_z < 2 && blocked < 4096U; ++other_z) {
+          ASSERT_FALSE(
+              std::isfinite(lattice.rankedEdgeCost({3, y, z}, {4, y + dy, other_z})));
+          ++blocked;
+        }
+      }
+    }
+  }
+  ASSERT_EQ(blocked, 4096U);
+  const detail::PersistentPlannerNode3D west{3, 510, 1};
+  const detail::PersistentPlannerNode3D east{4, 510, 1};
+  ASSERT_FALSE(std::isfinite(lattice.rankedEdgeCost(west, east)));
+  ASSERT_FALSE(lattice.edgeWaypoint(west, east).has_value());
+  if (change_world) {
+    auto opened = std::make_shared<ObservedOccupancyGrid3D>(*occupancy);
+    for (const GridIndex3D cell : changed_cells) {
+      ASSERT_TRUE(opened->setState(cell, ObservedVoxelState::kFree));
+    }
+    const auto after =
+        world(opened, 2U, RefinedDoorwayFixture::chunksOf(changed_cells));
+    lattice.installWorld(after);
+    detail::DStarLiteSession3D session{fixture.config, lattice};
+    std::size_t affected = 0U;
+    session.scheduleAffectedVertices(after, changed_cells, affected);
+    occupancy = std::move(opened);
+  }
+  lattice.retryDeferredRefinements(100000U,
+                                   std::chrono::steady_clock::time_point::min());
+  ASSERT_FALSE(lattice.edgeWaypoint(west, east).has_value());
+  for (int update = 0; update < 10 && !lattice.edgeWaypoint(west, east); ++update) {
+    lattice.retryDeferredRefinements(100000U,
+                                     std::chrono::steady_clock::time_point::max());
+  }
+  const auto waypoint = lattice.edgeWaypoint(west, east);
+  ASSERT_TRUE(waypoint.has_value()) << "the fan lost when the active queue was full";
+  EXPECT_TRUE(lattice.pathTraversable(
+      {lattice.pointFor(west), *waypoint, lattice.pointFor(east)}));
+}
+
+TEST(PersistentDStarLitePlanner3DTest, AnOverflowedDoorwayFanEventuallyOpens) {
+  expectOverflowedDoorwayFanEventuallyOpens(false);
+}
+
+TEST(PersistentDStarLitePlanner3DTest, AnOverflowedDoorwayFanUsesTheChangedWorld) {
+  expectOverflowedDoorwayFanEventuallyOpens(true);
+}
+
 TEST(PersistentDStarLitePlanner3DTest,
      AStalledFanBlockedEdgeStaysBlockedWhenEveryCandidateWasTried) {
   // The resume must not turn a fan that was tried whole into a search that

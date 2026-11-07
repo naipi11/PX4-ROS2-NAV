@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <bit>
 #include <chrono>
 #include <cmath>
 #include <cstddef>
@@ -96,27 +97,90 @@ std::optional<Point3> PlannerLattice3D::probeRefinementFan(
 void PlannerLattice3D::deferRefinement(const PersistentPlannerEdge3D& edge,
                                        const std::size_t next_probe) {
   const auto offsets = static_cast<std::size_t>(config_->edge_refinement_offsets);
-  if (offsets == 0U || next_probe >= 4U * offsets ||
-      deferred_refinements_.size() >= kMaximumDeferredRefinements ||
-      !deferred_refinement_members_.insert(edge).second) {
+  if (offsets == 0U || config_->maximum_edge_refinement_probes == 0U ||
+      next_probe >= 4U * offsets || deferred_refinement_members_.contains(edge)) {
     return;
   }
+  const LevelZeroSlot slot = levelZeroSlot(edge);
+  const auto bit = static_cast<std::uint16_t>(1U << slot.direction);
+  if (!deferred_overflow_.empty() && (deferred_overflow_[slot.node] & bit) != 0U) {
+    return;
+  }
+  if (deferred_refinements_.size() >= kMaximumDeferredRefinements) {
+    if (deferred_overflow_.empty()) {
+      deferred_overflow_.assign(nodeCount(), 0U);
+    }
+    deferred_overflow_[slot.node] |= bit;
+    ++deferred_overflow_count_;
+    return;
+  }
+  deferred_refinement_members_.insert(edge);
   deferred_refinements_.push_back(DeferredRefinement3D{
       .edge = edge, .next_probe = next_probe, .change_epoch = change_epoch_});
 }
 
 void PlannerLattice3D::forgetDeferredRefinement(const PersistentPlannerEdge3D& edge) {
-  if (!deferred_refinement_members_.erase(edge)) {
-    return;
+  if (!deferred_overflow_.empty()) {
+    const LevelZeroSlot slot = levelZeroSlot(edge);
+    const auto bit = static_cast<std::uint16_t>(1U << slot.direction);
+    if ((deferred_overflow_[slot.node] & bit) != 0U) {
+      deferred_overflow_[slot.node] &= static_cast<std::uint16_t>(~bit);
+      --deferred_overflow_count_;
+    }
   }
-  std::erase_if(deferred_refinements_,
-                [&](const DeferredRefinement3D& item) { return item.edge == edge; });
+  if (deferred_refinement_members_.erase(edge) != 0U) {
+    std::erase_if(deferred_refinements_,
+                  [&](const DeferredRefinement3D& item) { return item.edge == edge; });
+  }
+}
+
+void PlannerLattice3D::refillDeferredRefinements(
+    const std::chrono::steady_clock::time_point deadline) {
+  while (deferred_overflow_count_ != 0U &&
+         deferred_refinements_.size() < kMaximumDeferredRefinements &&
+         std::chrono::steady_clock::now() < deadline) {
+    const std::size_t index = deferred_overflow_cursor_;
+    const std::uint16_t mask = deferred_overflow_[index];
+    if (mask == 0U) {
+      deferred_overflow_cursor_ = (index + 1U) % deferred_overflow_.size();
+      continue;
+    }
+    const auto direction = static_cast<std::size_t>(std::countr_zero(mask));
+    const auto bit = static_cast<std::uint16_t>(1U << direction);
+    deferred_overflow_[index] &= static_cast<std::uint16_t>(~bit);
+    --deferred_overflow_count_;
+    const LevelZeroSlot slot{.node = index, .direction = direction};
+    if (levelZeroState(slot) != kLevelZeroEdgeBlocked) {
+      continue;
+    }
+    const PersistentPlannerNode3D first = nodeAt(index);
+    const LevelZeroOffset3D offset = kLevelZeroOffsets[direction];
+    const PersistentPlannerNode3D second{first.x + offset.x, first.y + offset.y,
+                                         first.z + offset.z};
+    if (!nodeInside(second)) {
+      continue;
+    }
+    const PersistentPlannerEdge3D edge = canonicalEdge(first, second);
+    if (!deferred_refinement_members_.insert(edge).second) {
+      continue;
+    }
+    // Overflow does not keep a cursor or epoch. Rechecking the entire fan on
+    // current placements is conservative after any intervening world change.
+    placeNode(first);
+    placeNode(second);
+    deferred_refinements_.push_back(DeferredRefinement3D{
+        .edge = edge, .next_probe = 0U, .change_epoch = change_epoch_});
+  }
 }
 
 void PlannerLattice3D::retryDeferredRefinements(
     const std::size_t maximum_probes,
     const std::chrono::steady_clock::time_point deadline) {
-  if (deferred_refinements_.empty() || maximum_probes == 0U) {
+  if (maximum_probes == 0U) {
+    return;
+  }
+  refillDeferredRefinements(deadline);
+  if (deferred_refinements_.empty()) {
     return;
   }
   std::size_t spent{0U};
@@ -192,6 +256,7 @@ void PlannerLattice3D::retryDeferredRefinements(
     deferred_refinements_.push_back(item);
     deferred_refinement_members_.insert(item.edge);
   }
+  refillDeferredRefinements(deadline);
 }
 
 std::vector<PersistentPlannerEdge3D> PlannerLattice3D::takePromotedEdges() {

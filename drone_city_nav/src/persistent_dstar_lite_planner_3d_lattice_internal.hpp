@@ -607,7 +607,7 @@ public:
   [[nodiscard]] std::vector<PersistentPlannerEdge3D> takePromotedEdges();
 
   [[nodiscard]] bool hasDeferredRefinements() const noexcept {
-    return !deferred_refinements_.empty();
+    return !deferred_refinements_.empty() || deferred_overflow_count_ != 0U;
   }
 
 private:
@@ -635,6 +635,7 @@ private:
   // millions of level-zero edges per second; a hash lookup per query was the
   // dominant planner cost.
   static constexpr std::size_t kLevelZeroDirections{13U};
+  static_assert(kLevelZeroDirections <= std::numeric_limits<std::uint16_t>::digits);
 
   struct LevelZeroSlot {
     std::size_t node{0U};
@@ -674,11 +675,9 @@ private:
   // whole compute budget and the search stops converging.
   std::size_t edge_refinement_probes_{0U};
 
-  // Blocked edges whose refinement stopped on that budget rather than on an
-  // exhausted fan, with the fan index each resumes at. Queued in the order
-  // they were met and resumed from the front, so one update's truncation
-  // cannot starve the edges behind it. Bounded: an edge that does not fit
-  // stays blocked on this world, as every such edge did before.
+  // The active queue retains exact fan cursors and is bounded. When full,
+  // one bit per canonical edge records the remaining work; that fan restarts
+  // at its first candidate when admitted, on the current world.
   struct DeferredRefinement3D {
     PersistentPlannerEdge3D edge{};
     std::size_t next_probe{0U};
@@ -689,6 +688,10 @@ private:
   std::deque<DeferredRefinement3D> deferred_refinements_;
   std::unordered_set<PersistentPlannerEdge3D, PersistentPlannerEdge3DHash>
       deferred_refinement_members_;
+  std::vector<std::uint16_t> deferred_overflow_;
+  std::size_t deferred_overflow_count_{0U};
+  std::size_t deferred_overflow_cursor_{0U};
+  void refillDeferredRefinements(std::chrono::steady_clock::time_point deadline);
   // Edges a resumed fan promoted from blocked to refined, waiting for the
   // owner to repair the searches that priced them blocked.
   std::vector<PersistentPlannerEdge3D> promoted_edges_;
