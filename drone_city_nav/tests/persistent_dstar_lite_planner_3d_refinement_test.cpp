@@ -274,12 +274,32 @@ TEST(PersistentDStarLitePlanner3DTest, APlannerWhoseBudgetStopsAFanStillOpensADo
     if (update.publishable()) {
       break;
     }
+    ASSERT_NE(update.progress, SearchProgress3D::kNoRoute)
+        << "the dispatcher must not terminate before a deferred doorway is tried";
   }
   ASSERT_TRUE(update.publishable())
       << "a budget below one fan never opened the doorway in " << updates
       << " updates: input=" << static_cast<int>(update.input_status);
   expectRawValid(candidate(update).points, *fixture.occupancy,
                  planner.config().physical_footprint);
+}
+
+TEST(PersistentDStarLitePlanner3DTest,
+     DisabledRefinementBudgetCanTerminateWithoutRoute) {
+  RefinedDoorwayFixture fixture;
+  fixture.config.maximum_edge_refinement_probes = 0U;
+  PersistentDStarLitePlanner3D planner{fixture.config};
+  const PersistentPlannerRequest3D req =
+      request(fixture.start, fixture.goal, world(fixture.occupancy, 1U));
+  PlannerUpdate3D update;
+  for (int attempt = 0; attempt < 400; ++attempt) {
+    update = planner.plan(req);
+    ASSERT_FALSE(update.publishable());
+    if (update.progress == SearchProgress3D::kNoRoute) {
+      return;
+    }
+  }
+  FAIL() << "a disabled refinement budget cannot make deferred fans progress";
 }
 
 TEST(PersistentDStarLitePlanner3DTest, APathIsAcceptedOnlyAsItsRoutePiecesClear) {

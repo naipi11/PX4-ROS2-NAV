@@ -898,8 +898,15 @@ PersistentDStarLitePlanner3DImpl::plan(const PersistentPlannerRequest3D& request
     escape_search_pending_ = true;
   }
 
+  // A blocked edge whose refinement fan has not finished can still open a
+  // route. A no-route result is terminal to the dispatcher, so keep searching
+  // until those resumable fans have been tried. A zero probe budget cannot
+  // advance them and must not turn a terminal result into an infinite wait.
+  const bool deferred_route_work = coordinator_.incumbent() == nullptr &&
+                                   config_.maximum_edge_refinement_probes > 0U &&
+                                   lattice_.hasDeferredRefinements();
   const bool search_complete =
-      repair_complete && spatial_search_complete &&
+      repair_complete && spatial_search_complete && !deferred_route_work &&
       (!spatial_route_available || execution_time_refiner_.complete());
   telemetry.incumbent_available = coordinator_.incumbent() != nullptr;
   if (!search_complete) {

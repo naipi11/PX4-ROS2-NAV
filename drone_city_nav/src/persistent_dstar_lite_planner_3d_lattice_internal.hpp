@@ -606,6 +606,10 @@ public:
                                 std::chrono::steady_clock::time_point deadline);
   [[nodiscard]] std::vector<PersistentPlannerEdge3D> takePromotedEdges();
 
+  [[nodiscard]] bool hasDeferredRefinements() const noexcept {
+    return !deferred_refinements_.empty();
+  }
+
 private:
   const PersistentPlannerConfig3D* config_{nullptr};
   GridBounds3D raw_bounds_{};

@@ -577,7 +577,7 @@ TEST(PersistentDStarLitePlanner3DTest,
   const Point3 goal{11.5, 5.5, 2.5};
   const PlannerUpdate3D initial =
       planner.plan(request(start, goal, world(blocked, 1U)));
-  ASSERT_EQ(initial.progress, SearchProgress3D::kNoRoute);
+  ASSERT_FALSE(initial.publishable());
 
   auto opened = std::make_shared<ObservedOccupancyGrid3D>(*blocked);
   const GridIndex3D opening{7, 5, 2};

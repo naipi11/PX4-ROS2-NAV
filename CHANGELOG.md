@@ -77,6 +77,12 @@ release names the asset tags it was validated with.
   opened — and the feasibility search clears the component it had marked
   closed, which it otherwise reopens only when the world changes or the
   vehicle moves.
+- A search without an incumbent stays running while a queued fan can still
+  advance. Reporting `no route` as soon as D* finishes made the route
+  dispatcher terminate before deferred fans could open a doorway. A zero
+  refinement-probe budget still permits termination because it cannot drain
+  the queue. The doorway regression failed under the old terminal contract
+  and now checks continuation until a raw-valid route is published.
 - Offline evidence on r3510's exact recorded raw revision 3520, same binary
   and same request: the frozen-world probe found no goal candidate in 300
   updates at the deployed 256-probe budget, and a raw-sweep-clear 83-point
