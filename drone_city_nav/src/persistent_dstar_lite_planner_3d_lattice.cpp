@@ -714,11 +714,10 @@ double PlannerLattice3D::rawEdgeCost(const PersistentPlannerNode3D first,
           // waypoint fan is an opportunistic upgrade on top of that answer.
           // Leaving the edge unknown instead would re-run the straight sweep
           // on every later query in the same update, and a search that
-          // revalidates the same edges cannot converge inside its budget. A
-          // fan the update's budget cut short is queued to resume on a later
-          // update, so an edge the budget reached too late is not cached
-          // blocked for the life of the world; one whose whole fan was tried
-          // stays blocked, as it always did.
+          // revalidates the same edges cannot converge inside its budget.
+          // A fan the update's budget cut short is queued to resume on a later
+          // update while capacity remains. If the queue is full, this edge
+          // remains cached blocked; a fan tried whole stays blocked as well.
           std::size_t next_probe{0U};
           bool fan_exhausted{false};
           // The fresh path keeps its old bound: the probe budget, and the

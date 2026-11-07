@@ -106,6 +106,13 @@ release names the asset tags it was validated with.
   `no route` at update 1045 without a candidate. The deferred-termination fix
   therefore resolves the doorway regression, not the recorded-map search;
   this replay does not establish a live-flight outcome.
+- A separate instrumented replay on `2f14d0c` reached the 4096-entry queue
+  cap: 31,994 enqueue attempts were refused for capacity, out of 42,735 calls.
+  The diagnostic interposed the same queue decision and only counted events;
+  its trace and source are retained as `2f14d0c-queue-probe.log` and
+  `deferred_queue_probe.cpp`. Calls are not necessarily distinct edges. The
+  counters do not identify whether a refused edge was needed by a route or
+  prove the cause of the original flight failure.
 - The resumed pass runs outside any search, so the probe budget alone would
   bound it: two raw swept-body validations near evidence are milliseconds
   each. Each resumed fan therefore also stops at the update's repair deadline,
