@@ -6,6 +6,18 @@ release names the asset tags it was validated with.
 
 ## Unreleased
 
+### Incident debug bag coverage
+
+- The optional debug bag now subscribes to the 3D raw occupancy base and
+  deltas, original lidar cloud and latest sensor scan, route markers, applied
+  control, clock, transforms and relevant PX4 attitude and sensor timing.
+  Execution horizons were already recorded. These topics improve prospective
+  investigations; they cannot recover missing historical evidence.
+- Recording is not lossless or proof of an applied horizon. Check the received
+  base/delta identities, topic coverage, recorder QoS and resource usage before
+  drawing conclusions. Route markers are periodic diagnostic geometry rather
+  than a complete revision-bound route.
+
 ### K27's vertical allowance is the profile's own
 
 - The clearance law measures the body's clearance with the estimate's height
@@ -79,6 +91,11 @@ release names the asset tags it was validated with.
   its retained trace reports repeated feasibility restarts. Wall-clock search
   budgets make the outcomes timing-sensitive. Neither observation establishes
   the live flight's outcome or general planner liveness.
+- An extended static replay at the same 256-probe budget ended with `no route`
+  at update 1029, without publishing a candidate. The earlier high-budget
+  candidate passed raw-envelope and upright-body checks on the same recorded
+  map. This is a finite-budget search limitation, not a live-flight result;
+  the trace does not identify which promotions reset the escape fill.
 - The resumed pass runs outside any search, so the probe budget alone would
   bound it: two raw swept-body validations near evidence are milliseconds
   each. Each resumed fan therefore also stops at the update's repair deadline,

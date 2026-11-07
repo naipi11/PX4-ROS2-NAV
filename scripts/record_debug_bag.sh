@@ -17,8 +17,20 @@ ros2 bag record \
   /drone_city_nav/obstacle_memory_provenance \
   /drone_city_nav/obstacle_memory_snapshot \
   /drone_city_nav/raw_obstacle_snapshot \
+  /drone_city_nav/raw_obstacle_snapshot_3d \
+  /drone_city_nav/raw_obstacle_delta_3d \
+  /drone_city_nav/latest_sensor_obstacle_scan \
+  /lidar_3d/points \
   /drone_city_nav/mppi/execution_horizon \
   /drone_city_nav/mppi/status \
   /drone_city_nav/mppi/path \
+  /drone_city_nav/mppi/markers \
+  /drone_city_nav/mppi/applied_control \
+  /clock \
+  /tf \
+  /tf_static \
   /fmu/out/vehicle_local_position_v1 \
+  /fmu/out/vehicle_attitude \
+  /fmu/out/sensor_combined \
+  /fmu/out/timesync_status \
   /fmu/out/vehicle_status_v1

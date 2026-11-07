@@ -337,11 +337,24 @@ committed.
 
 ## Debug Bags
 
-Record a debug ROS bag while simulation is running:
+Start the recorder before the interval of interest, from the project container:
 
 ```bash
-./scripts/record_debug_bag.sh
+BAG_OUTPUT_DIR=/workspace/log/my_incident_bag ./scripts/record_debug_bag.sh
 ```
 
-The script records the main planning, obstacle, and debug topics used for
-post-run analysis.
+The recorder subscribes to 3D raw occupancy snapshots and deltas, the original lidar
+cloud, the latest mapped sensor scan, MPPI execution horizons and applied
+control, route markers, clock, transforms and selected PX4 state. The default
+output is `log/rosbag_city_debug`; choose a new `BAG_OUTPUT_DIR` for each run.
+Raw lidar and snapshots can consume substantial storage and recording can
+affect runtime performance, so check available space and the host verdict.
+
+This is not a lossless incident recorder. Verify the bag contains the required
+topics and a matching producer/base snapshot for each delta before relying on
+it. Deltas and sensor data can be dropped, and a recorded horizon does not
+prove it was accepted or applied. The persistent-route marker is diagnostic
+geometry at its publication cadence, not a complete revision-bound route.
+The bag cannot recover topics published before the recorder starts, except
+where the publisher's transient-local QoS and recorder subscription permit
+late joining.
