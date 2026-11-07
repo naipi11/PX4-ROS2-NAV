@@ -16,21 +16,24 @@ release names the asset tags it was validated with.
   clearance is measured against continuous voxel boxes, so no probe has to
   fall on a cell boundary.
 - The camera set keeps 0.5 m, which is its estimator's own measured error (0.3
-  to 0.6 m, 0.57 m by the end of an ordinary flight, r1183 to r1184). The lidar
-  set takes 0.34 m, the one measured height error of the lidar-inertial
-  estimate (the offset it sat at near r3180's contact). Both figures now travel
-  through one path: the parameter `estimate_vertical_error_m`, the planning
-  coordinator, and the departure's approach test in the persistent planner.
+  to 0.6 m, 0.57 m by the end of an ordinary flight, r1183 to r1184), and the
+  lidar set keeps 0.5 m too: the mechanism ships, the lidar figure does not.
+  Both figures travel through one path — the parameter
+  `estimate_vertical_error_m`, the planning coordinator, and the departure's
+  approach test in the persistent planner — so a profile can state its own.
 - Why it matters: r3400's 19.5 s at a 0.064 m/s median reference is the body
   law pinning the reference while the envelope still admits motion (45 of 59
-  sampled ticks: body clearance under 0.05 m, envelope over 0.30 m). A ceiling
-  inside the 0.5 m band above the body reads as contact and holds the
-  reference at the contact-departure speed; the lidar's own 0.34 m band is
-  narrower.
-- Not established: no flight has flown this. The change moves a control input
-  on the lidar profile, so it needs the 5-lidar series before it can be called
-  accepted, and the r3400 slow interval itself cannot be replayed because its
-  local map and full route were never retained.
+  sampled ticks: body clearance under 0.05 m, envelope over 0.30 m), so the
+  figure sets how fast the vehicle may fly in a room whose ceiling lies inside
+  the band above its body.
+- Why the lidar figure is not changed here: set to the lidar's measured
+  0.34 m, the second flight of its series crashed. The approach to the contact
+  was clearance-limited and the wider body clearance admitted more speed there
+  — the ticks before the contact read a `clearance` limit of 1.18 to 1.81 m/s,
+  where the 0.5 m band prices the same geometry at the contact floor — and the
+  crash chain it entered is the one r3180 showed. A speed law that opens rooms
+  up needs its own validated series; the evidence is under
+  log/tools/vio/depth_visibility_20261103/r3800_lidar_crash_20261107/.
 - Regression: one geometry reports 0.0, 0.06 and 0.24 m of body clearance for
   allowances of 0.50, 0.34 and 0.16 m; with the allowance rounded up to the
   evidence grid the last two would both read 0.0.

@@ -63,19 +63,28 @@ VISION_MEMORY_OVERRIDES = {
     "hit_weight": 2,
 }
 
-# K27's vertical allowance on the lidar profile. The clearance law measures the
-# body's clearance with the estimate's height error on it, and the figure
-# belongs to the estimator that produces the height, not to the airframe: the
-# 0.5 m the law was built with is the camera estimator's own measured error
-# (0.3 to 0.6 m, 0.57 m by the end of an ordinary flight, r1183 to r1184). The
-# lidar profile inherited it although its one measured height error is the
-# 0.34 m the lidar-inertial estimate sat above the truth near r3180's contact.
-# A room whose ceiling lies inside a 0.5 m band above the body then reads as
-# contact and holds the reference at the contact-departure speed, which is the
-# shape of r3400's 19.5 s at 0.064 m/s. Set from that measurement; the whole
-# figure is unvalidated by flight, so any change of it needs a lidar series.
+# K27's vertical allowance on the lidar profile.
+#
+# The figure belongs to the estimator that produces the height, not to the
+# airframe: the 0.5 m the law was built with is the camera estimator's own
+# measured error (0.3 to 0.6 m, 0.57 m by the end of an ordinary flight,
+# r1183 to r1184), and the lidar profile inherited it although the one
+# measured lidar-inertial height error is the 0.34 m it sat at near r3180's
+# contact. That is why the figure is a parameter at all.
+#
+# It is kept at 0.5 here, unchanged from before the parameter existed, and the
+# measurement alone was not enough to move it. Tried at 0.34 on 2026-11-07, the
+# second lidar flight of that series crashed: the approach to the contact was
+# clearance-limited, and the wider body clearance admitted more speed there
+# (the ticks before the contact read a `clearance` limit of 1.18 to 1.81 m/s
+# where the narrower band prices the same geometry at the contact floor). The
+# allowance is a speed law in exactly the rooms a narrow band would open up,
+# and the crash chain it entered is the one r3180 showed, so the change needs
+# its own validated series before it can ship; until then the profile keeps the
+# figure every accepted lidar flight was flown with. The evidence is under
+# log/tools/vio/depth_visibility_20261103/r3800_lidar_crash_20261107/.
 LIDAR_VERTICAL_ERROR_OVERRIDES = {
-    "estimate_vertical_error_m": 0.34,
+    "estimate_vertical_error_m": 0.5,
 }
 
 
