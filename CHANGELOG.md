@@ -132,6 +132,14 @@ release names the asset tags it was validated with.
   pieces all pass (`candidate_65536_sweep_compare.log`). The algorithm uses a
   conservative interval cover, so the whole-segment rejection can be more
   conservative; the recorded checks alone do not establish contact.
+- With the bounded overflow fix (`a4a35bf`), the 5080 static-map replay found
+  a 111-point goal candidate on cycle 243 (the 244th update), with whole-segment
+  raw sweeps clear. An independent 0.5 m-piece check of the rounded route found
+  zero envelope or upright-body rejections in 542 pieces, length 265.565 m.
+  The traces are `a4a35bf-recorded-map-smoke.log` and
+  `candidate_a4a35bf_validation.log`. The replay has no live sensor, K27
+  uncertainty, controller, handoff or flight, and its wall-clock deadlines
+  make the update count timing-dependent.
 - The resumed pass runs outside any search, so the probe budget alone would
   bound it: two raw swept-body validations near evidence are milliseconds
   each. Each resumed fan therefore also stops at the update's repair deadline,
