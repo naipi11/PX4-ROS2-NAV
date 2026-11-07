@@ -102,6 +102,10 @@ release names the asset tags it was validated with.
   candidate passed raw-envelope and upright-body checks on the same recorded
   map. This is a finite-budget search limitation, not a live-flight result;
   the trace does not identify which promotions reset the escape fill.
+- On `890e032` the same static map and 256-probe budget still returned
+  `no route` at update 1045 without a candidate. The deferred-termination fix
+  therefore resolves the doorway regression, not the recorded-map search;
+  this replay does not establish a live-flight outcome.
 - The resumed pass runs outside any search, so the probe budget alone would
   bound it: two raw swept-body validations near evidence are milliseconds
   each. Each resumed fan therefore also stops at the update's repair deadline,
