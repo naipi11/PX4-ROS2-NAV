@@ -74,6 +74,11 @@ release names the asset tags it was validated with.
   establishes that the original live r3510 had a routable world. The candidate
   re-checked at 0.5 m pieces covers 536 pieces with no envelope or upright-body
   rejection, 262.9 m long, 0.0 m from the goal.
+- The earlier `c78687a` probe produced a 107-point candidate at budget 256.
+  A later smoke replay on `a072af8` produced no candidate in 300 updates;
+  its retained trace reports repeated feasibility restarts. Wall-clock search
+  budgets make the outcomes timing-sensitive. Neither observation establishes
+  the live flight's outcome or general planner liveness.
 - The resumed pass runs outside any search, so the probe budget alone would
   bound it: two raw swept-body validations near evidence are milliseconds
   each. Each resumed fan therefore also stops at the update's repair deadline,
