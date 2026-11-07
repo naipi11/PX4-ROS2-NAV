@@ -113,6 +113,20 @@ release names the asset tags it was validated with.
   `deferred_queue_probe.cpp`. Calls are not necessarily distinct edges. The
   counters do not identify whether a refused edge was needed by a route or
   prove the cause of the original flight failure.
+- A diagnostic-only interposition raised the queue cap to 65,536 on the same
+  static map and kept all 42,601 enqueue calls (peak queue 40,320). It returned
+  a 75-point goal candidate at update 527, but the probe's whole-segment raw
+  sweep rejected segment 58, so the run failed. An independent check of the
+  rounded candidate in 0.5 m pieces reported zero envelope and upright-body
+  rejections across 565 pieces. These checks disagree and do not establish
+  physical safety. The cap was not changed in flight configuration; neither
+  result proves flight success. See `070f788-queue-65536-probe.log`,
+  `deferred_queue_65536_probe.cpp` and `candidate_65536_validation.log`.
+  On that rounded segment the whole sweep reports `raw_collision` at
+  `(52.875, -6.375, 9.375)`, while checks split into 2, 3, 4, 8 and 16
+  pieces all pass (`candidate_65536_sweep_compare.log`). The algorithm uses a
+  conservative interval cover, so the whole-segment rejection can be more
+  conservative; the recorded checks alone do not establish contact.
 - The resumed pass runs outside any search, so the probe budget alone would
   bound it: two raw swept-body validations near evidence are milliseconds
   each. Each resumed fan therefore also stops at the update's repair deadline,
