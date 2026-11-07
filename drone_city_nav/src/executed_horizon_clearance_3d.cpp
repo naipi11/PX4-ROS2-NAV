@@ -23,22 +23,16 @@ namespace {
                     second.z - first.z);
 }
 
-// Compare geometric margins, not ESDF lower bounds: the latter change with the
-// query's position inside a voxel even during motion parallel to a flat wall.
-// Enclose each sweep interval by its centre-line box plus the physical cylinder.
-// This contains the entire continuous sweep and the whole-cell vertical error
-// interval; its raw-box inflation margin remains a conservative speed input.
+// Compare geometric margins, not ESDF lower bounds. Enclose each sweep
+// interval by its centre-line box plus the physical cylinder and configured
+// vertical allowance; the result is a conservative speed input.
 [[nodiscard]] double bodyClearanceM(const WorldSnapshot3D& world, const Point3& first,
                                     const Point3& second,
                                     const SweptFootprintConfig& footprint,
                                     const double cap_m,
                                     const double estimate_vertical_error_m) {
-  // K27's allowance is used as stated, not rounded up to whole evidence cells:
-  // the clearance is measured against continuous voxel boxes, so no part of
-  // the geometry needs the probes to fall on cell boundaries, and rounding up
-  // collapses every figure inside one cell to the same value — the camera's
-  // 0.5 m and the lidar's measured 0.34 m became one band on a 0.25 m grid.
-  // A profile that holds its height better than another must be able to say so.
+  // Measure against continuous voxel boxes using the configured allowance.
+  // The 0.34 m trial value came from one recorded offset, not a safety bound.
   const double error_m = std::isfinite(estimate_vertical_error_m)
                              ? std::max(0.0, estimate_vertical_error_m)
                              : 0.0;

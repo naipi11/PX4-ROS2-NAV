@@ -678,6 +678,7 @@ private:
   struct DeferredRefinement3D {
     PersistentPlannerEdge3D edge{};
     std::size_t next_probe{0U};
+    std::uint64_t change_epoch{0U};
   };
 
   static constexpr std::size_t kMaximumDeferredRefinements{4096U};

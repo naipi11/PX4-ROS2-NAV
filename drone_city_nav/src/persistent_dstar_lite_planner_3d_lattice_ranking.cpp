@@ -216,7 +216,8 @@ void PlannerLattice3D::resetNodeClearances() noexcept {
 void PlannerLattice3D::noteChangedChunks(
     const std::unordered_set<OccupancyChunkIndex3D, OccupancyChunkIndex3DHash>&
         changed_chunks) {
-  if (changed_chunks.empty() || clearanceRankingReachM() <= 0.0) {
+  if (changed_chunks.empty() ||
+      (clearanceRankingReachM() <= 0.0 && deferred_refinements_.empty())) {
     return;
   }
   ++change_epoch_;

@@ -101,8 +101,8 @@ void PlannerLattice3D::deferRefinement(const PersistentPlannerEdge3D& edge,
       !deferred_refinement_members_.insert(edge).second) {
     return;
   }
-  deferred_refinements_.push_back(
-      DeferredRefinement3D{.edge = edge, .next_probe = next_probe});
+  deferred_refinements_.push_back(DeferredRefinement3D{
+      .edge = edge, .next_probe = next_probe, .change_epoch = change_epoch_});
 }
 
 void PlannerLattice3D::forgetDeferredRefinement(const PersistentPlannerEdge3D& edge) {
@@ -145,6 +145,28 @@ void PlannerLattice3D::retryDeferredRefinements(
     // world it was walking is spent.
     if (levelZeroState(slot) != kLevelZeroEdgeBlocked) {
       continue;
+    }
+    if (item.change_epoch != change_epoch_) {
+      // A previous failed waypoint can become clear after an occupied change
+      // beside either of its off-edge legs. Bound every possible waypoint and
+      // body by a sphere about the canonical edge midpoint; an unrelated
+      // changed chunk leaves the fan's progress intact.
+      const Point3 first = canonicalPointFor(item.edge.first);
+      const Point3 second = canonicalPointFor(item.edge.second);
+      const Point3 midpoint{0.5 * (first.x + second.x), 0.5 * (first.y + second.y),
+                            0.5 * (first.z + second.z)};
+      const auto offsets = static_cast<double>(config_->edge_refinement_offsets);
+      const auto& body = config_->physical_footprint;
+      const double reach =
+          0.5 * distance3D(first, second) + maximumNodePlacementOffsetM() +
+          config_->minimum_horizontal_step_m * offsets / (offsets + 1.0) +
+          std::max({body.radius_m, body.lower_extent_m, body.upper_extent_m});
+      if (clearanceStale(midpoint, reach, item.change_epoch)) {
+        item.next_probe = 0U;
+        placeNode(item.edge.first);
+        placeNode(item.edge.second);
+      }
+      item.change_epoch = change_epoch_;
     }
     bool fan_exhausted{false};
     // The limit is per edge here: a pass that splits its allowance between

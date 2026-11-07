@@ -63,26 +63,12 @@ VISION_MEMORY_OVERRIDES = {
     "hit_weight": 2,
 }
 
-# K27's vertical allowance on the lidar profile.
-#
-# The figure belongs to the estimator that produces the height, not to the
-# airframe: the 0.5 m the law was built with is the camera estimator's own
-# measured error (0.3 to 0.6 m, 0.57 m by the end of an ordinary flight,
-# r1183 to r1184), and the lidar profile inherited it although the one
-# measured lidar-inertial height error is the 0.34 m it sat at near r3180's
-# contact. That is why the figure is a parameter at all.
-#
-# It is kept at 0.5 here, unchanged from before the parameter existed, and the
-# measurement alone was not enough to move it. Tried at 0.34 on 2026-11-07, the
-# second lidar flight of that series crashed: the approach to the contact was
-# clearance-limited, and the wider body clearance admitted more speed there
-# (the ticks before the contact read a `clearance` limit of 1.18 to 1.81 m/s
-# where the narrower band prices the same geometry at the contact floor). The
-# allowance is a speed law in exactly the rooms a narrow band would open up,
-# and the crash chain it entered is the one r3180 showed, so the change needs
-# its own validated series before it can ship; until then the profile keeps the
-# figure every accepted lidar flight was flown with. The evidence is under
-# log/tools/vio/depth_visibility_20261103/r3800_lidar_crash_20261107/.
+# K27's lidar allowance stays at 0.5 m. A 0.34 m value derived from one
+# r3180 height-offset observation was tried; the fourth trial flight crashed.
+# The recording does not establish whether the allowance caused that contact
+# or what a 0.5 m counterfactual would have done. Keep the previous setting
+# while the collision and the profile's error distribution remain unverified.
+# Evidence: log/tools/vio/depth_visibility_20261103/r3800_lidar_crash_20261107/.
 LIDAR_VERTICAL_ERROR_OVERRIDES = {
     "estimate_vertical_error_m": 0.5,
 }

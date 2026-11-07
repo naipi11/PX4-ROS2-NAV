@@ -21,41 +21,42 @@ release names the asset tags it was validated with.
   Both figures travel through one path — the parameter
   `estimate_vertical_error_m`, the planning coordinator, and the departure's
   approach test in the persistent planner — so a profile can state its own.
-- Acceptance on `c78687a`: five camera flights then five lidar flights on that
-  one commit, one at a time, each inspected before the next, every flight
-  host-valid (the real-time factor 1.00 at p50 in all ten; the stereo floor is
-  0.82 and the lidar's 0.97). Cameras 1.925, 1.914, 1.833, 1.904, 1.838 m/s
-  against R3's 1.2, truth 1.56, 0.96, 1.11, 1.22, 1.23 m against R2's 2.0;
-  lidar 2.551, 3.025, 2.764, 2.813, 2.889 m/s against 2.4, truth 0.48, 0.75,
-  0.43, 0.76, 0.55 m; no contact in any of the ten. The series is kept with
-  `log/tools/vio/depth_visibility_20261103/lidar_series_c78687a_20261107/`.
-- Why it matters: r3400's 19.5 s at a 0.064 m/s median reference is the body
-  law pinning the reference while the envelope still admits motion (45 of 59
-  sampled ticks: body clearance under 0.05 m, envelope over 0.30 m), so the
-  figure sets how fast the vehicle may fly in a room whose ceiling lies inside
-  the band above its body.
-- Why the lidar figure is not changed here: set to the lidar's measured
-  0.34 m, the second flight of its series crashed. The approach to the contact
-  was clearance-limited and the wider body clearance admitted more speed there
-  — the ticks before the contact read a `clearance` limit of 1.18 to 1.81 m/s,
-  where the 0.5 m band prices the same geometry at the contact floor — and the
-  crash chain it entered is the one r3180 showed. A speed law that opens rooms
-  up needs its own validated series; the evidence is under
-  log/tools/vio/depth_visibility_20261103/r3800_lidar_crash_20261107/.
+- Ten flights on `c78687a` passed their individual mission checks and host
+  verdicts: five lidar flights followed by five camera flights, all with a
+  median real-time factor of 1.00. Cameras flew 1.925, 1.914, 1.833, 1.904,
+  1.838 m/s, with truth errors of 1.56, 0.96, 1.11, 1.22, 1.23 m; lidar flew
+  2.551, 3.025, 2.764, 2.813, 2.889 m/s, with errors of 0.48, 0.75, 0.43,
+  0.76, 0.55 m. This reverse order is not the camera-then-lidar sequence A1
+  requires; these flights do not constitute A1 acceptance. The summaries are
+  under `log/tools/vio/depth_visibility_20261103/lidar_series_c78687a_20261107/`.
+- The r3400 slow interval included 59 logged horizon samples; 45 had first-
+  interval body clearance under 0.05 m and envelope clearance over 0.30 m.
+  These quantities alone do not identify the limiting voxel or prove that a
+  different vertical allowance would have prevented the slow interval.
+- With the lidar allowance set to 0.34 m, the fourth flight crashed. Its
+  approach was clearance-limited; recorded limits of 1.18 and 1.81 m/s do not
+  establish what the 0.5 m configuration would have commanded on the same
+  state and evidence. The original local evidence and full horizon needed for
+  that comparison were not recorded. The allowance was restored to 0.5 m as
+  a precaution; the collision's causes and the effect of 0.34 m remain open.
+  The retained run is under
+  `log/tools/vio/depth_visibility_20261103/r3800_lidar_crash_20261107/`.
 - Regression: one geometry reports 0.0, 0.06 and 0.24 m of body clearance for
   allowances of 0.50, 0.34 and 0.16 m; with the allowance rounded up to the
   evidence grid the last two would both read 0.0.
 
 ### Deferred edge refinement resumes
 
-- A blocked level-zero edge whose waypoint fan stopped on the per-update probe
-  budget is no longer cached blocked for the life of the world. The fan keeps
-  its position in the fan order, is queued with the candidate it had reached,
-  and the queue is resumed from the front on later updates with the same
-  per-update allowance, an even share per edge so no fan starves the ones
-  behind it. A fan whose every candidate the raw sweep refused stays blocked
-  exactly as before, and nothing unvalidated is ever admitted: a promoted edge
-  is one both of whose legs the ordinary raw swept-body rule cleared.
+- A level-zero edge whose waypoint fan stops on the per-update probe budget is
+  queued for later refinement while capacity remains. The queue is capped at
+  4096 edges; additional truncated fans still remain cached blocked. A
+  promoted waypoint must pass the ordinary raw swept-body checks. This is a
+  bounded mitigation, not a guarantee that every deferred edge is retried.
+- A queued fan restarts its candidate cursor when changed occupied evidence
+  touches the region containing its possible waypoint legs. Without that, a
+  previously blocked waypoint could become clear while the old cursor skipped
+  it; an offset-doorway regression reproduces the removal and its recovery.
+  Changes outside that region do not discard the cursor's progress.
 - A promotion now reaches the searches that priced the edge blocked. The
   persistent session queues both endpoints for repair whether or not it holds
   a record for them — a blocked edge is exactly the one the backward search
