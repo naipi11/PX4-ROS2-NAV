@@ -21,6 +21,14 @@ release names the asset tags it was validated with.
   Both figures travel through one path — the parameter
   `estimate_vertical_error_m`, the planning coordinator, and the departure's
   approach test in the persistent planner — so a profile can state its own.
+- Acceptance on `c78687a`: five camera flights then five lidar flights on that
+  one commit, one at a time, each inspected before the next, every flight
+  host-valid (the real-time factor 1.00 at p50 in all ten; the stereo floor is
+  0.82 and the lidar's 0.97). Cameras 1.925, 1.914, 1.833, 1.904, 1.838 m/s
+  against R3's 1.2, truth 1.56, 0.96, 1.11, 1.22, 1.23 m against R2's 2.0;
+  lidar 2.551, 3.025, 2.764, 2.813, 2.889 m/s against 2.4, truth 0.48, 0.75,
+  0.43, 0.76, 0.55 m; no contact in any of the ten. The series is kept with
+  `log/tools/vio/depth_visibility_20261103/lidar_series_c78687a_20261107/`.
 - Why it matters: r3400's 19.5 s at a 0.064 m/s median reference is the body
   law pinning the reference while the envelope still admits motion (45 of 59
   sampled ticks: body clearance under 0.05 m, envelope over 0.30 m), so the
