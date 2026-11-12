@@ -207,6 +207,16 @@ that accepts those four UDP ports on `lo` only and drops them elsewhere, with a
 reboot, and it blocks a ground station in another machine by design
 (`MAVLINK_FIREWALL_ALLOW_INTERFACES` keeps one).
 
+Two simulators on one host cannot share these ports, and PX4 makes that worse
+than it looks: its GCS stream goes to a hardcoded `127.0.0.1:14550` whatever the
+instance number (`mavlink_main.cpp`, `-o 14550`), so every PX4 on the host sends
+its ground-station stream to the same place. A guard on `14550` therefore holds
+the port another simulator's operator expects, and an operator script that opens
+`14550` with `source_system=255` - the pattern in this host's `/tmp/ap_*.py` -
+sends its commands to whichever PX4 answers. Run one simulator at a time, or
+point that operator at its own simulator's instance ports, and use
+`SITL_MAVLINK_GUARD_PORTS` to narrow which ports a flight holds.
+
 Even with both, a flight on a shared network should be read from PX4's own ulog
 (`vehicle_command` source ids, `telemetry_status`, the logged
 `partner IP`) before its result is believed.

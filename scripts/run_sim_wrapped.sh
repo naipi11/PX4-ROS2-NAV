@@ -27,13 +27,21 @@ fi
 # duration; the navigation stack drives PX4 over uXRCE/DDS, so nothing of the
 # stack wants them. SITL_MAVLINK_GUARD=false flies without this gate.
 mavlink_guard_log="${repo_root}/log/mavlink_guard.log"
+# PX4 SITL sends its GCS stream to a hardcoded 127.0.0.1:14550 whatever its
+# instance number, so this guard holds the same port any other simulator on this
+# host uses for its own ground station. SITL_MAVLINK_GUARD_PORTS narrows or
+# extends the list when two simulators must share the host.
+mavlink_guard_ports_args=()
+if [[ -n "${SITL_MAVLINK_GUARD_PORTS:-}" ]]; then
+  mavlink_guard_ports_args=(--ports "${SITL_MAVLINK_GUARD_PORTS}")
+fi
 case "${SITL_MAVLINK_GUARD:-true}" in
   0 | false | no | off)
     echo "MAVLink guard: disabled by SITL_MAVLINK_GUARD"
     ;;
   *)
     if ! python3 "${repo_root}/scripts/sitl_mavlink_guard.py" --probe \
-      --log "${mavlink_guard_log}"; then
+      --log "${mavlink_guard_log}" "${mavlink_guard_ports_args[@]}"; then
       cat >&2 <<'REFUSAL'
 Refusing to fly: a process on this host already holds a PX4 SITL MAVLink port,
 so it can command the vehicle in flight. Name it with
@@ -46,7 +54,7 @@ REFUSAL
     # The guard frees the ports by itself when this script exits, however it
     # exits, so a flight that dies early leaves nothing holding them.
     python3 "${repo_root}/scripts/sitl_mavlink_guard.py" \
-      --log "${mavlink_guard_log}" >/dev/null 2>&1 &
+      --log "${mavlink_guard_log}" "${mavlink_guard_ports_args[@]}" >/dev/null 2>&1 &
     mavlink_guard_pid=$!
     sleep 0.3
     if ! kill -0 "${mavlink_guard_pid}" 2>/dev/null; then
