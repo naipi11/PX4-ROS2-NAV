@@ -35,14 +35,22 @@ forward stereo pair, time-of-flight rangefinders and the IMU; 420 m at a mean
 the vehicle knows and decides ([docs/rviz.md](docs/rviz.md)), the whole flight
 uncut in real time, as recorded for v0.5.0 (October 2026).
 
+## Origin
+
+This repository continues [formiat/px4-ros2-drone-nav](https://github.com/formiat/px4-ros2-drone-nav)
+at v0.7.0 (`4fc128d9`) and keeps its history, tags and MIT licence. The
+environment asset bundles stay published on the original repository, so the
+download URLs in `environments/environment_manifest.yaml` and the release links in
+`docs/roadmap.md` name it on purpose: those artifacts live there.
+
 ## Quick Start
 
 On a Linux host with Docker, git and the NVIDIA container runtime, one script
 prepares a fresh clone and starts the urban point-to-point simulation:
 
 ```bash
-git clone https://github.com/formiat/px4-ros2-drone-nav.git
-cd px4-ros2-drone-nav
+git clone https://github.com/naipi11/PX4-ROS2-NAV.git
+cd PX4-ROS2-NAV
 ./scripts/bootstrap.sh
 ```
 
