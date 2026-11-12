@@ -81,13 +81,46 @@ def bind_exclusive(port: int) -> socket.socket:
     return held
 
 
-def probe(ports: tuple[int, ...], listen_ports: tuple[int, ...] = ()) -> int:
-    for port in tuple(ports) + tuple(listen_ports):
-        try:
-            bind_exclusive(port).close()
-        except OSError as error:
-            print(f"MAVLINK_GUARD probe=occupied port={port} error={error.strerror}")
-            return 1
+def previous_guard_alive(pidfile: Path | None) -> bool:
+    """True when a guard of ours still holds its ports.
+
+    A guard frees its ports when the wrapper that started it exits, but it
+    notices that by polling, so for a moment after one flight the next flight's
+    probe can find the ports still held. That is our own holder, not an
+    intruder, and refusing there would make the gate flaky.
+    """
+    if pidfile is None or not pidfile.is_file():
+        return False
+    try:
+        pid = int(pidfile.read_text().strip())
+    except (OSError, ValueError):
+        return False
+    try:
+        command = Path(f"/proc/{pid}/cmdline").read_bytes()
+    except OSError:
+        return False
+    return b"sitl_mavlink_guard" in command
+
+
+def probe(ports: tuple[int, ...], listen_ports: tuple[int, ...] = (),
+          pidfile: Path | None = None, wait_s: float = 5.0) -> int:
+    deadline = time.monotonic() + wait_s
+    while True:
+        blocked = None
+        for port in tuple(ports) + tuple(listen_ports):
+            try:
+                bind_exclusive(port).close()
+            except OSError as error:
+                blocked = (port, error.strerror)
+                break
+        if blocked is None:
+            break
+        if previous_guard_alive(pidfile) and time.monotonic() < deadline:
+            time.sleep(0.2)
+            continue
+        print(f"MAVLINK_GUARD probe=occupied port={blocked[0]} "
+              f"error={blocked[1]}")
+        return 1
     held = ",".join(str(p) for p in ports)
     listened = ",".join(str(p) for p in listen_ports) or "-"
     print(f"MAVLINK_GUARD probe=free ports={held} px4_listen_ports={listened}")
@@ -121,6 +154,10 @@ def hold(ports: tuple[int, ...], log_path: Path | None, seconds: float,
         return 1
     for held in sockets:
         held.settimeout(0.25)
+    pidfile_path = log_path.with_suffix(".pid") if log_path is not None else None
+    if pidfile_path is not None:
+        pidfile_path.parent.mkdir(parents=True, exist_ok=True)
+        pidfile_path.write_text(f"{os.getpid()}\n")
     log = None
     if log_path is not None:
         log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -184,6 +221,8 @@ def hold(ports: tuple[int, ...], log_path: Path | None, seconds: float,
                    f"elapsed_s={time.monotonic() - started:.1f}")
     for held in sockets:
         held.close()
+    if pidfile_path is not None:
+        pidfile_path.unlink(missing_ok=True)
     summary = (f"MAVLINK_GUARD freed datagrams={datagrams} foreign_intents={foreign} "
                f"foreign_types={dict(sorted(foreign_types.items()))} "
                f"undecodable={undecodable} seconds={time.monotonic() - started:.1f}")
@@ -221,8 +260,9 @@ def main() -> int:
         listen_ports = ()
     else:
         listen_ports = tuple(int(p) for p in args.listen_ports.split() if p)
+    probe_pidfile = args.log.with_suffix(".pid") if args.log is not None else None
     if args.probe:
-        return probe(ports, listen_ports)
+        return probe(ports, listen_ports, probe_pidfile)
     return hold(ports, args.log, args.seconds, not args.keep_parent)
 
 

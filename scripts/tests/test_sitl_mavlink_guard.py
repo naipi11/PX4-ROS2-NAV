@@ -88,6 +88,53 @@ class MavlinkGuardTest(unittest.TestCase):
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
         self.assertIn(f"px4_listen_ports={listen_port}", result.stdout)
 
+    def test_probe_refuses_promptly_when_the_holder_is_not_our_guard(self) -> None:
+        # A guard of ours that is winding down may hold the ports for a moment;
+        # any other holder must be refused at once, or a real intruder would be
+        # waited out and forgotten.
+        import tempfile
+        holder = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        holder.bind(("127.0.0.1", 0))
+        port = holder.getsockname()[1]
+        other = subprocess.Popen(["sleep", "30"])
+        try:
+            with tempfile.TemporaryDirectory() as directory:
+                pidfile = Path(directory) / "mavlink_guard.pid"
+                pidfile.write_text(f"{other.pid}\n")
+                started = time.monotonic()
+                result = subprocess.run(
+                    [sys.executable, str(GUARD), "--probe", "--ports", str(port),
+                     "--log", str(Path(directory) / "mavlink_guard.log")],
+                    capture_output=True, text=True, check=False)
+                elapsed = time.monotonic() - started
+        finally:
+            holder.close()
+            other.kill()
+            other.wait()
+        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+        self.assertLess(elapsed, 3.0, "probe waited on a holder that is not our guard")
+
+    def test_hold_publishes_and_removes_its_pidfile(self) -> None:
+        import tempfile
+        port = free_port()
+        with tempfile.TemporaryDirectory() as directory:
+            log = Path(directory) / "mavlink_guard.log"
+            guard = subprocess.Popen(
+                [sys.executable, str(GUARD), "--seconds", "3", "--ports", str(port),
+                 "--log", str(log)],
+                stdout=subprocess.PIPE, text=True)
+            pidfile = log.with_suffix(".pid")
+            try:
+                time.sleep(1.0)
+                self.assertTrue(pidfile.is_file(), "no pidfile while the guard holds")
+                self.assertEqual(guard.pid, int(pidfile.read_text().strip()))
+                guard.communicate(timeout=30)
+            finally:
+                if guard.poll() is None:
+                    guard.kill()
+                    guard.communicate()
+            self.assertFalse(pidfile.exists(), "pidfile left behind after the guard freed")
+
     def test_hold_refuses_a_held_port(self) -> None:
         holder = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         holder.bind(("127.0.0.1", 0))

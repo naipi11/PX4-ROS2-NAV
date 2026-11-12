@@ -32,7 +32,8 @@ case "${SITL_MAVLINK_GUARD:-true}" in
     echo "MAVLink guard: disabled by SITL_MAVLINK_GUARD"
     ;;
   *)
-    if ! python3 "${repo_root}/scripts/sitl_mavlink_guard.py" --probe; then
+    if ! python3 "${repo_root}/scripts/sitl_mavlink_guard.py" --probe \
+      --log "${mavlink_guard_log}"; then
       cat >&2 <<'REFUSAL'
 Refusing to fly: a process on this host already holds a PX4 SITL MAVLink port,
 so it can command the vehicle in flight. Name it with
