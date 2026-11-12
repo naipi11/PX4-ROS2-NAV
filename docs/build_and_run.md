@@ -186,10 +186,25 @@ flight nothing: the guard never sends, PX4 sees no ground station, and a flight
 under the guard behaves exactly as one with nobody listening. `SITL_MAVLINK_GUARD=false`
 flies without the gate.
 
-This closes the demonstrated path, not every path. PX4's own UDP sockets are
-bound to `0.0.0.0`, so a peer on the network can still send MAVLink straight at
-`14580` or `18570` without binding anything locally; the guard cannot prevent
-that, and a flight on a shared network should be read from PX4's own ulog
+The probe also covers the ports PX4 SITL itself listens on - `18570`,
+`14580`, `14280` and `13030` - because our PX4 binds them moments after the
+launch. Another PX4 on the same host (a second simulator, as on 2026-11-12)
+holds those sockets, and two instances fighting over one set of ports produce
+flights whose evidence describes neither vehicle; the run refuses instead
+(`--listen-ports none` skips that part of the probe).
+
+That gate covers what a local process can bind. It does not cover a peer on the
+network: PX4's own UDP sockets are bound to `0.0.0.0` and its `-x` flag is the
+FTP server, not a bind restriction, so a remote host can address `18570` or
+`14580` directly - a flight under the guard logged `partner IP:
+192.168.110.76`. `scripts/host_mavlink_firewall.sh` closes that on the host
+(`sudo bash scripts/host_mavlink_firewall.sh apply`, `remove` to undo): a chain
+that accepts those four UDP ports on `lo` only and drops them elsewhere, with a
+`PX4_MAVLINK_DROP` log prefix and packet counters. It is not persisted across a
+reboot, and it blocks a ground station in another machine by design
+(`MAVLINK_FIREWALL_ALLOW_INTERFACES` keeps one).
+
+Even with both, a flight on a shared network should be read from PX4's own ulog
 (`vehicle_command` source ids, `telemetry_status`, the logged
 `partner IP`) before its result is believed.
 

@@ -42,7 +42,14 @@ import sys
 import time
 from pathlib import Path
 
+# The remote ports PX4 sends its streams to: the guard holds these.
 DEFAULT_PORTS = (14550, 14540)
+# The ports PX4 SITL itself listens on (ROMFS/px4fmu_common/init.d-posix/
+# px4-rc.mavlink, instance 0). Our own PX4 binds them a moment after the launch,
+# so they must be free beforehand: if another PX4 - a second simulator on the
+# same host, as on 2026-11-12 - already holds them, the two instances would
+# fight over the same sockets and neither flight's evidence would mean anything.
+PX4_LISTEN_PORTS = (18570, 14580, 14280, 13030)
 PX4_SYSTEM_ID = 1
 MAGIC_V2 = 0xFD
 MAGIC_V1 = 0xFE
@@ -74,14 +81,16 @@ def bind_exclusive(port: int) -> socket.socket:
     return held
 
 
-def probe(ports: tuple[int, ...]) -> int:
-    for port in ports:
+def probe(ports: tuple[int, ...], listen_ports: tuple[int, ...] = ()) -> int:
+    for port in tuple(ports) + tuple(listen_ports):
         try:
             bind_exclusive(port).close()
         except OSError as error:
             print(f"MAVLINK_GUARD probe=occupied port={port} error={error.strerror}")
             return 1
-    print(f"MAVLINK_GUARD probe=free ports={','.join(str(p) for p in ports)}")
+    held = ",".join(str(p) for p in ports)
+    listened = ",".join(str(p) for p in listen_ports) or "-"
+    print(f"MAVLINK_GUARD probe=free ports={held} px4_listen_ports={listened}")
     return 0
 
 
@@ -188,7 +197,11 @@ def main() -> int:
     parser.add_argument("--seconds", type=float, default=0.0,
                         help="hold for this long; 0 holds until SIGTERM or SIGINT")
     parser.add_argument("--ports", default=None,
-                        help="space-separated ports; default 14550 14540")
+                        help="space-separated remote ports to hold; default 14550 14540")
+    parser.add_argument("--listen-ports", default=None,
+                        help="space-separated PX4 listen ports that must be free "
+                             "before the launch; default 18570 14580 14280 13030, "
+                             "'none' to skip")
     parser.add_argument("--keep-parent", action="store_true",
                         help="hold even after the process that started this one exits")
     args = parser.parse_args()
@@ -196,8 +209,14 @@ def main() -> int:
     if not ports:
         print("MAVLINK_GUARD no ports to guard", file=sys.stderr)
         return 2
+    if args.listen_ports is None:
+        listen_ports = PX4_LISTEN_PORTS
+    elif args.listen_ports.strip().lower() in ("", "none"):
+        listen_ports = ()
+    else:
+        listen_ports = tuple(int(p) for p in args.listen_ports.split() if p)
     if args.probe:
-        return probe(ports)
+        return probe(ports, listen_ports)
     return hold(ports, args.log, args.seconds, not args.keep_parent)
 
 

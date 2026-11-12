@@ -62,6 +62,32 @@ class MavlinkGuardTest(unittest.TestCase):
         self.assertIn(f"probe=occupied port={port}", result.stdout)
         self.assertIn("Address already in use", result.stdout)
 
+    def test_probe_refuses_when_another_px4_holds_a_listen_port(self) -> None:
+        # Two PX4 SITL instances on one host claim the same sockets; a flight
+        # must not start into that, because neither instance's evidence would
+        # then describe a controlled vehicle.
+        remote, listen_port = free_port(), free_port()
+        px4 = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        px4.bind(("0.0.0.0", listen_port))
+        try:
+            result = subprocess.run(
+                [sys.executable, str(GUARD), "--probe", "--ports", str(remote),
+                 "--listen-ports", str(listen_port)],
+                capture_output=True, text=True, check=False)
+        finally:
+            px4.close()
+        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+        self.assertIn(f"probe=occupied port={listen_port}", result.stdout)
+
+    def test_probe_accepts_free_remote_and_listen_ports(self) -> None:
+        remote, listen_port = free_port(), free_port()
+        result = subprocess.run(
+            [sys.executable, str(GUARD), "--probe", "--ports", str(remote),
+             "--listen-ports", str(listen_port)],
+            capture_output=True, text=True, check=False)
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertIn(f"px4_listen_ports={listen_port}", result.stdout)
+
     def test_hold_refuses_a_held_port(self) -> None:
         holder = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         holder.bind(("127.0.0.1", 0))
