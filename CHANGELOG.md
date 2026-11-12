@@ -6,6 +6,14 @@ release names the asset tags it was validated with.
 
 ## Unreleased
 
+### Stop rejection evidence
+
+- A throttled stop-rejection log now includes the exact input state and prior
+  control, their identities and timing, the raw-map and sensor identities,
+  minimum control count, and validation-policy fingerprint. These fields help
+  associate a recorded rejection with matching evidence; the log does not
+  retain the rejected horizon or prove sensor receipt or safe flight.
+
 ### Incident debug bag coverage
 
 - The optional debug bag now subscribes to the 3D raw occupancy base and
