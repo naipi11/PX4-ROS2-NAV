@@ -162,6 +162,37 @@ Preview cleanup without terminating processes:
 The GUI workflow logs Gazebo server output to `log/gz_drone_nav.log` and Gazebo
 GUI output to `log/gz_gui_drone_nav.log`.
 
+## The MAVLink Gate On A Shared Host
+
+PX4 SITL sends its GCS stream to `127.0.0.1:14550` and its offboard stream to
+`14540`, so any process that binds either port receives that stream and can
+command the vehicle over MAVLink. On 2026-11-12 a foreign `pymavlink` client on
+the simulation host did exactly that, sending `DO_SET_MODE`, `ARM_DISARM` and
+`NAV_TAKEOFF` into a running flight; PX4 entered `AUTO_TAKEOFF` and four
+flights were destroyed while the stack's own logs looked like a stop-arbitration
+defect. The record is `log/runs/nav_state17_root_cause_20261112.txt`.
+
+Every `sim_*.sh` wrapper therefore runs `scripts/sitl_mavlink_guard.py` before
+the launch:
+
+- it probes both ports without `SO_REUSEADDR`, so a port another process holds
+  is reported and the run is refused (`exit 3`) before anything is spawned;
+- it then holds both ports for the flight and logs every MAVLink frame whose
+  source system is not PX4's own to `log/mavlink_guard.log`;
+- it frees them by itself when the wrapper exits, however it exits.
+
+The navigation stack drives PX4 over uXRCE/DDS, so holding these ports costs the
+flight nothing: the guard never sends, PX4 sees no ground station, and a flight
+under the guard behaves exactly as one with nobody listening. `SITL_MAVLINK_GUARD=false`
+flies without the gate.
+
+This closes the demonstrated path, not every path. PX4's own UDP sockets are
+bound to `0.0.0.0`, so a peer on the network can still send MAVLink straight at
+`14580` or `18570` without binding anything locally; the guard cannot prevent
+that, and a flight on a shared network should be read from PX4's own ulog
+(`vehicle_command` source ids, `telemetry_status`, the logged
+`partner IP`) before its result is believed.
+
 ## Logs And Artifacts
 
 Important runtime artifacts:

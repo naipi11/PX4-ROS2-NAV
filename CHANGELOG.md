@@ -6,6 +6,16 @@ release names the asset tags it was validated with.
 
 ## Unreleased
 
+- Every `sim_*.sh` wrapper now gates the flight on PX4 SITL's MAVLink ports: it
+  refuses to start while any process holds `127.0.0.1:14550` or `14540`, then
+  holds both for the flight and records any MAVLink frame whose source is not
+  PX4 in `log/mavlink_guard.log` (`scripts/sitl_mavlink_guard.py`,
+  `SITL_MAVLINK_GUARD=false` to disable). On 2026-11-12 a foreign `pymavlink`
+  client on the host sent `DO_SET_MODE`, `ARM_DISARM` and `NAV_TAKEOFF` into a
+  running flight through that port and destroyed four flights while the stack's
+  logs read like a stop-arbitration defect; the guard closes the demonstrated
+  path, and PX4's ulog remains the record to check on a shared network, since a
+  peer can still address `14580`/`18570` directly.
 - A stop rejection's throttled log line now carries the exact input state and
   prior control, their identities and timing, the raw-map and latest-sensor
   identities and timestamps, the minimum control count and the
