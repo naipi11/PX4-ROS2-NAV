@@ -177,8 +177,11 @@ the launch:
 
 - it probes both ports without `SO_REUSEADDR`, so a port another process holds
   is reported and the run is refused (`exit 3`) before anything is spawned;
-- it then holds both ports for the flight and logs every MAVLink frame whose
-  source system is not PX4's own to `log/mavlink_guard.log`;
+- it then holds both ports for the flight and logs every mode, command or
+  setpoint frame whose source system is not PX4's own to
+  `log/mavlink_guard.log`; plain telemetry from another simulator on this host
+  (its own `MAV_SYS_ID`) is not counted, since only a frame that can take the
+  vehicle away from the stack is an intrusion;
 - it frees them by itself when the wrapper exits, however it exits.
 
 The navigation stack drives PX4 over uXRCE/DDS, so holding these ports costs the

@@ -126,6 +126,35 @@ class MavlinkGuardTest(unittest.TestCase):
         self.assertIn("foreign_intents=2", output)
         self.assertIn("'COMMAND_LONG': 2", output)
 
+    def test_another_simulator_telemetry_is_not_counted_as_an_intent(self) -> None:
+        # A second PX4 on this host has its own MAV_SYS_ID and also sends to
+        # 14550. Its telemetry must not read as an intrusion; only frames that
+        # can command the vehicle may.
+        port = free_port()
+        guard = subprocess.Popen(
+            [sys.executable, str(GUARD), "--seconds", "4", "--ports", str(port)],
+            stdout=subprocess.PIPE, text=True)
+        try:
+            time.sleep(1.0)
+            sender = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            try:
+                # Heartbeat (id 0) from another simulator's system 3.
+                sender.sendto(command_long(3, 1, message_id=0), ("127.0.0.1", port))
+                sender.sendto(command_long(3, 1, message_id=32), ("127.0.0.1", port))
+                time.sleep(0.3)
+                sender.sendto(command_long(3, 1), ("127.0.0.1", port))
+                time.sleep(0.3)
+            finally:
+                sender.close()
+            output, _ = guard.communicate(timeout=30)
+        finally:
+            if guard.poll() is None:
+                guard.kill()
+                guard.communicate()
+        self.assertEqual(0, guard.returncode, output)
+        self.assertIn("foreign_intents=1", output)
+        self.assertIn("'COMMAND_LONG': 1", output)
+
     def test_the_guard_frees_its_ports_when_its_parent_exits(self) -> None:
         # The flight wrapper starts the guard in the background, so a wrapper
         # that dies early must not leave the ports held: the next flight would

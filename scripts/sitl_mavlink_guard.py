@@ -170,8 +170,14 @@ def hold(ports: tuple[int, ...], log_path: Path | None, seconds: float,
             message_id, source_system, source_component, _ = header
             if source_system == PX4_SYSTEM_ID:
                 continue  # PX4's own outbound stream arrives here too
+            # Only a frame that can take the vehicle away from the stack counts
+            # as an intent. Another simulator on this host (its own PX4 has its
+            # own MAV_SYS_ID) also sends telemetry to 14550, and counting that
+            # as intrusion would bury the signal in someone else's stream.
+            name = COMMAND_MESSAGE_IDS.get(message_id)
+            if name is None:
+                continue
             foreign += 1
-            name = COMMAND_MESSAGE_IDS.get(message_id, f"id{message_id}")
             foreign_types[name] = foreign_types.get(name, 0) + 1
             record(f"MAVLINK_GUARD foreign type={name} src=({source_system},"
                    f"{source_component}) from={address[0]}:{address[1]} "
