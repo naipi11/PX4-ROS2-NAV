@@ -37,6 +37,17 @@ a kept directory, or into a new directory with its own `.keep`.
 Runs are named `rNNN`; a flight's artifacts are in `log/runs/rNNN/` and its
 mission check's output in `log/tools/run_rNNN.log`.
 
+
+Two things bite when a flight's records are read, and both bit on 2026-11-12:
+
+- **The simulation clock drifts against the wall clock inside one run** (about 3 s
+  over 95 s on 20261112T043103Z). Never map a log epoch to a `gz_pose` row with a
+  fixed offset: interpolate through `gz_pose`'s own epoch column (the ninth) the
+  way `crash_window.py` does, or a 0.35 s event lands seconds away.
+- **`PRODUCTION_MPPI_SUMMARY` is logged more than once a flight**, and the first
+  one reports `ticks=1` from startup. Read the LAST line for the flight's tick
+  figures; taking the first makes a healthy 5.5 ms flight look like 1.7 ms.
+
 ## Launching
 
 | Tool | What it does | Use |
