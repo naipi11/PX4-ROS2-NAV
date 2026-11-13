@@ -100,6 +100,7 @@ any kind is `REAL_TIME_FACTOR=0.5 ./tools/series2.sh r1100`.
 
 | Tool | What it prints | Use |
 |---|---|---|
+| `stop_supersession.py` | How long a published stop survives: every `STOP_EXECUTION published=true` paired with the next `EXECUTION_HORIZON published=true mode=planned` inside a window (1 s by default), with the speed the stop was certified at and the gap. A stop reads as braking in a record; over the day's 69 flights 1365 of 1372 stops were replaced within a second (median 110 ms, 2 ms the fastest, 613 within 100 ms) at a median of 1.79 m/s and up to 5.04 m/s, so what a record shows is a stop that began and was overwritten. Reads only `ros_drone_nav.log`. | `python3 tools/stop_supersession.py 20261113T155419Z-1573 --window 0.5` |
 | `mx_inspect.py` | Everything the acceptance asks of one flight: failing lines, speed, truth at the goal, the return's trigger and moment, light judgments, the least light flown in, gaze overshoots, tick time, real-time factor. | `python3 tools/mx_inspect.py r949 r950` |
 | `mxs.sh` | The same, cut to the acceptance lines, with the count of failing lines. | `./tools/mxs.sh r949` |
 | `homeway.py` | The way home of a returned flight: when and where the goal was given up, seconds and metres home, trail points, revocations. | `python3 tools/homeway.py r974` |
