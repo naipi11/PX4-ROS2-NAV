@@ -137,6 +137,26 @@ struct ExecutionHorizonCommitResult3D {
     const AppliedControlEvidence3D& control, const ExecutionOwnerIdentity3D& owner,
     std::int64_t now_ns, double maximum_age_ms) noexcept;
 
+// Names the first clause that makes that evidence unusable, or nullptr when it is
+// usable; the bool above is derived from it. A stop needs this evidence, and on
+// 2026-11-13 seven stops in a row were refused here with nothing recorded to say
+// which clause failed.
+[[nodiscard]] const char* appliedControlCurrentForExecutionInputFailure3D(
+    const AppliedControlEvidence3D& control, const ExecutionOwnerIdentity3D& owner,
+    std::int64_t now_ns, double maximum_age_ms) noexcept;
+
+// The same for the previous-control evidence a new execution input carries: the
+// offboard feedback it names, or the measured acceleration, must still describe
+// the lease being executed. A stop needs this evidence, and on 2026-11-13 seven
+// stops in a row were refused because of it with nothing recorded to say which
+// clause failed.
+[[nodiscard]] const char* previousControlEvidenceFailure3D(
+    const VersionedExecutionInput3D& input,
+    const ExecutionHorizonNavigationWitness3D& navigation,
+    const AppliedControlEvidence3D& resident_control,
+    const ExecutionOwnerIdentity3D& resident_owner, std::int64_t now_ns,
+    double maximum_control_feedback_age_ms, bool stationary_capture_rearm) noexcept;
+
 // Names the first predicate that makes the applied-control evidence
 // non-authoritative for this owner, or returns nullptr when it is
 // authoritative. Diagnostics use it so a deferred supersession can say why.

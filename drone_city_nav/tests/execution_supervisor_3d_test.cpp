@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -323,6 +324,84 @@ TEST(ExecutionSupervisor3DTest, HoldFeedbackOfTheSameHoldIsCurrentPreviousContro
       appliedControlCurrentForExecutionInput3D(feedback, planned_owner, now_ns, 200.0));
   EXPECT_TRUE(appliedControlCurrentForExecutionInput3D(planned_feedback, planned_owner,
                                                        now_ns, 200.0));
+}
+
+// The diagnostic reason must agree with the boolean on every path, and it must
+// name the clause the boolean refused: a stop needs this evidence, and on
+// 2026-11-13 seven stops in a row were refused with only the stage recorded.
+TEST(ExecutionSupervisor3DTest, TheControlEvidenceReasonAgreesWithTheBoolean) {
+  ExecutionOwnerIdentity3D owner;
+  owner.valid = true;
+  owner.valid_from_ns = 1'000'000'000;
+  owner.valid_until_ns = 4'000'000'000;
+  owner.producer_instance_id = 7U;
+  owner.target_offboard_instance_id = 9U;
+  owner.sequence = 42U;
+  owner.execution_mode = ExecutionAuthorityMode3D::kPlanned;
+
+  AppliedControlEvidence3D feedback;
+  feedback.valid = true;
+  feedback.control_authoritative = true;
+  feedback.producer_instance_id = 9U;
+  feedback.horizon_producer_instance_id = 7U;
+  feedback.horizon_sequence = 42U;
+  feedback.execution_mode = ExecutionAuthorityMode3D::kPlanned;
+  feedback.source_stamp_ns = 1'900'000'000;
+  feedback.receive_stamp_ns = 1'910'000'000;
+  const std::int64_t now_ns = 1'950'000'000;
+
+  const auto check = [&](const AppliedControlEvidence3D& control,
+                         const ExecutionOwnerIdentity3D& candidate_owner,
+                         const std::int64_t at_ns, const double age_ms,
+                         const char* const expected) {
+    const char* const reason = appliedControlCurrentForExecutionInputFailure3D(
+        control, candidate_owner, at_ns, age_ms);
+    const bool current = appliedControlCurrentForExecutionInput3D(
+        control, candidate_owner, at_ns, age_ms);
+    EXPECT_EQ(reason == nullptr, current);
+    if (expected == nullptr) {
+      EXPECT_NE(reason, nullptr);
+    } else if (std::string_view{expected} == "usable") {
+      EXPECT_EQ(reason, nullptr);
+    } else {
+      ASSERT_NE(reason, nullptr);
+      EXPECT_EQ(std::string_view{reason}, std::string_view{expected});
+    }
+  };
+
+  check(feedback, owner, now_ns, 200.0, "usable");
+
+  // A control whose producer is not the owner's offboard instance.
+  AppliedControlEvidence3D wrong_producer = feedback;
+  wrong_producer.producer_instance_id = 8U;
+  check(wrong_producer, owner, now_ns, 200.0, "control_or_owner_identity_invalid");
+
+  // A sequence that pairs with neither the owner nor its predecessor.
+  AppliedControlEvidence3D wrong_sequence = feedback;
+  wrong_sequence.horizon_sequence = 40U;
+  check(wrong_sequence, owner, now_ns, 200.0,
+        "control_owner_mode_or_sequence_pair_mismatch");
+
+  // The predecessor's own horizon is accepted, the one before it is not.
+  AppliedControlEvidence3D predecessor = feedback;
+  predecessor.horizon_sequence = 41U;
+  check(predecessor, owner, now_ns, 200.0, "usable");
+  predecessor.horizon_sequence = 40U;
+  check(predecessor, owner, now_ns, 200.0,
+        "control_owner_mode_or_sequence_pair_mismatch");
+
+  // Hold feedback does not describe a planned owner.
+  AppliedControlEvidence3D hold_feedback = feedback;
+  hold_feedback.execution_mode = ExecutionAuthorityMode3D::kPositionHold;
+  check(hold_feedback, owner, now_ns, 200.0,
+        "control_owner_mode_or_sequence_pair_mismatch");
+
+  // Age, on either stamp.
+  check(feedback, owner, now_ns, 40.0, "control_source_age_exceeded");
+  AppliedControlEvidence3D old_receipt = feedback;
+  old_receipt.source_stamp_ns = 1'949'000'000;
+  // 40 ms is not *over* 40 ms: the source stays inside and only the receipt is out.
+  check(old_receipt, owner, now_ns, 39.0, "control_receipt_age_exceeded");
 }
 
 TEST(ExecutionSupervisor3DTest, ConcurrentLeaseCommitsHaveOneLinearizationWinner) {

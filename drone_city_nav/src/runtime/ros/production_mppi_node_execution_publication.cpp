@@ -355,6 +355,18 @@ ProductionMppiHorizonCommitStatus ProductionMppiNode::commitAndPublishExecutionH
   latest_horizon_assembly_ms_ = std::chrono::duration<double, std::milli>(
                                     commit_started - latest_publication_started_)
                                     .count();
+  // Built once so the refusal diagnostic judges the same witness the commit did.
+  const ExecutionHorizonNavigationWitness3D navigation_witness{
+      .state = navigation_.state,
+      .measured_equivalent_control = navigation_.measured_equivalent_control,
+      .pose_revision = navigation_.revision,
+      .source_timestamp_us = navigation_.source_timestamp_us,
+      .receive_stamp_ns = navigation_.receive_stamp_ns,
+      .measured_control_source_sequence = navigation_.source_timestamp_us,
+      .measured_control_source_stamp_ns = navigation_.receive_stamp_ns,
+      .measured_control_receive_stamp_ns = navigation_.receive_stamp_ns,
+      .measured_acceleration_authoritative = navigation_.measured_acceleration_valid,
+  };
   const ExecutionHorizonCommitResult3D committed =
       execution_supervisor_.commitHorizon(ExecutionHorizonCommitRequest3D{
           .candidate = std::move(candidate),
@@ -373,20 +385,7 @@ ProductionMppiHorizonCommitStatus ProductionMppiNode::commitAndPublishExecutionH
                   .navigation_authoritative = navigation_.valid,
                   .offboard_session_currentness = offboard_currentness,
               },
-          .navigation =
-              ExecutionHorizonNavigationWitness3D{
-                  .state = navigation_.state,
-                  .measured_equivalent_control =
-                      navigation_.measured_equivalent_control,
-                  .pose_revision = navigation_.revision,
-                  .source_timestamp_us = navigation_.source_timestamp_us,
-                  .receive_stamp_ns = navigation_.receive_stamp_ns,
-                  .measured_control_source_sequence = navigation_.source_timestamp_us,
-                  .measured_control_source_stamp_ns = navigation_.receive_stamp_ns,
-                  .measured_control_receive_stamp_ns = navigation_.receive_stamp_ns,
-                  .measured_acceleration_authoritative =
-                      navigation_.measured_acceleration_valid,
-              },
+          .navigation = navigation_witness,
           .current_observed_raw_world =
               !config_.world.use_static_map && committed_3d != nullptr
                   ? committed_3d->authoritativeOwner()
@@ -427,6 +426,86 @@ ProductionMppiHorizonCommitStatus ProductionMppiNode::commitAndPublishExecutionH
           static_cast<double>(publication_now_ns - offboard_session_receive_stamp_ns_) *
               1.0e-6,
           config_.execution.maximum_control_feedback_age_ms);
+    }
+    if (committed.status ==
+        ExecutionHorizonCommitStatus3D::kControlEvidenceNotCurrent) {
+      // A stop needs this commit. When it fails here nothing said which clause
+      // failed, and on 2026-11-13 seven stops in a row were refused with only
+      // the stage name recorded (log/runs/2026-11-13). Name the clause and the
+      // numbers it was judged on: the resident owner and control the commit
+      // compared against, the input's recorded previous control, and the ages.
+      const std::shared_ptr<const CommittedExecutionAuthority3D>& resident =
+          execution_supervisor_.authority();
+      const AppliedControlEvidence3D resident_control =
+          resident != nullptr ? resident->control() : AppliedControlEvidence3D{};
+      const ExecutionOwnerIdentity3D resident_owner =
+          resident != nullptr ? resident->owner() : ExecutionOwnerIdentity3D{};
+      const char* reason = "no_execution_input";
+      if (publication_execution_input != nullptr) {
+        // The commit also applies its stationary-capture rule; the reason below
+        // names the clause that refuses without it, which is the case a stop
+        // falls into.
+        reason = previousControlEvidenceFailure3D(
+            *publication_execution_input, navigation_witness, resident_control,
+            resident_owner, publication_now_ns,
+            config_.execution.maximum_control_feedback_age_ms,
+            /*stationary_capture_rearm=*/false);
+        if (reason == nullptr) {
+          reason = "current_without_stationary_capture";
+        }
+      }
+      RCLCPP_WARN_THROTTLE(
+          get_logger(), *get_clock(), 1000,
+          "EXECUTION_HORIZON_COMMIT control_evidence=%s previous_source=%u "
+          "input_sequence=%" PRIu64 " maximum_age_ms=%.1f "
+          "resident=%s producer:%" PRIu64 " seq:%" PRIu64 " mode:%u authoritative:%d "
+          "source_age_ms:%.1f receive_age_ms:%.1f "
+          "input_control=producer:%" PRIu64 " seq:%" PRIu64 " source_ns:%" PRId64
+          " receive_ns:%" PRId64 " input_effective_ns:%" PRId64
+          " input_pose_revision:%" PRIu64 " nav=revision:%" PRIu64
+          " valid:%d measured_valid:%d source_us:%" PRIu64 " receive_ns:%" PRId64
+          " now_ns:%" PRId64,
+          reason,
+          publication_execution_input != nullptr
+              ? static_cast<unsigned>(
+                    publication_execution_input->previousControlSource())
+              : 0U,
+          publication_execution_input != nullptr
+              ? publication_execution_input->captureSequence()
+              : std::uint64_t{0},
+          config_.execution.maximum_control_feedback_age_ms,
+          resident != nullptr ? "present" : "absent",
+          resident_control.horizon_producer_instance_id,
+          resident_control.horizon_sequence,
+          static_cast<unsigned>(resident_control.execution_mode),
+          resident_control.control_authoritative ? 1 : 0,
+          static_cast<double>(publication_now_ns - resident_control.source_stamp_ns) *
+              1.0e-6,
+          static_cast<double>(publication_now_ns - resident_control.receive_stamp_ns) *
+              1.0e-6,
+          publication_execution_input != nullptr
+              ? publication_execution_input->previousControlSourceProducerInstanceId()
+              : std::uint64_t{0},
+          publication_execution_input != nullptr
+              ? publication_execution_input->previousControlSourceSequence()
+              : std::uint64_t{0},
+          publication_execution_input != nullptr
+              ? publication_execution_input->previousControlSourceStampNs()
+              : std::int64_t{0},
+          publication_execution_input != nullptr
+              ? publication_execution_input->previousControlReceiveStampNs()
+              : std::int64_t{0},
+          publication_execution_input != nullptr
+              ? publication_execution_input->effectiveStampNs()
+              : std::int64_t{0},
+          publication_execution_input != nullptr
+              ? publication_execution_input->poseRevision()
+              : std::uint64_t{0},
+          navigation_witness.pose_revision,
+          navigation_witness.measured_acceleration_authoritative ? 1 : 0,
+          navigation_.measured_acceleration_valid ? 1 : 0,
+          navigation_witness.source_timestamp_us, navigation_witness.receive_stamp_ns,
+          publication_now_ns);
     }
     if (committed.status == ExecutionHorizonCommitStatus3D::kEvidenceNotCurrent) {
       const std::string_view currentness = executionPublicationCurrentnessStatus3DName(
