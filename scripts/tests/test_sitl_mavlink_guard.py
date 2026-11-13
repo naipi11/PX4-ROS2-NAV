@@ -54,7 +54,8 @@ class MavlinkGuardTest(unittest.TestCase):
         try:
             port = holder.getsockname()[1]
             result = subprocess.run(
-                [sys.executable, str(GUARD), "--probe", "--ports", str(port)],
+                [sys.executable, str(GUARD), "--probe", "--ports", str(port),
+                 "--listen-ports", "none"],
                 capture_output=True, text=True, check=False)
         finally:
             holder.close()
@@ -141,7 +142,8 @@ class MavlinkGuardTest(unittest.TestCase):
         try:
             port = holder.getsockname()[1]
             result = subprocess.run(
-                [sys.executable, str(GUARD), "--seconds", "1", "--ports", str(port)],
+                [sys.executable, str(GUARD), "--seconds", "1", "--ports", str(port),
+                 "--listen-ports", "none"],
                 capture_output=True, text=True, check=False)
         finally:
             holder.close()
@@ -215,7 +217,8 @@ class MavlinkGuardTest(unittest.TestCase):
         deadline = time.monotonic() + 10.0
         while time.monotonic() < deadline:
             probe = subprocess.run(
-                [sys.executable, str(GUARD), "--probe", "--ports", str(port)],
+                [sys.executable, str(GUARD), "--probe", "--ports", str(port),
+                 "--listen-ports", "none"],
                 capture_output=True, text=True, check=False)
             if probe.returncode == 0:
                 return
