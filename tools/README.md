@@ -47,6 +47,16 @@ Two things bite when a flight's records are read, and both bit on 2026-11-12:
 - **`PRODUCTION_MPPI_SUMMARY` is logged more than once a flight**, and the first
   one reports `ticks=1` from startup. Read the LAST line for the flight's tick
   figures; taking the first makes a healthy 5.5 ms flight look like 1.7 ms.
+- **A flight's status is its mission check's verdict, not the launch's exit
+  code.** The mission monitor exits with its `MISSION_RESULT` and the launch
+  follows it down, so `ros2 launch` can return non-zero for a flight that landed
+  on its goal; the launcher validates any log carrying a terminal result and
+  takes the validator's answer. Before 2026-11-13 it validated only on its own
+  timeout, so `MISSION_CHECK` never ran on a completed flight and those flights
+  were recorded by their `MISSION_RESULT` alone.
+- **The check wants a clean committed checkout** (`git status --porcelain` with
+  untracked files); one stray file fails it whatever the flight did. Commit
+  before flying, and leave no file at the repository root.
 
 ## Launching
 
