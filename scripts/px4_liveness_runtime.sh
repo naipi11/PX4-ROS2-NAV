@@ -25,6 +25,41 @@ px4_process_alive() {
 
 # Starts one PX4 per vehicle and leaves px4_pid (the first) and
 # multi_vehicle_px4_pids set, the way the launcher used to do inline.
+# Runs one autopilot with the parameter stream on its stdin and records its own
+# exit status where it happens.
+#
+# The stream is a pipe in the launcher's older form, and it never ends by
+# itself: px4_parameter_stream ends in `while true; do sleep 3600; done`, which
+# holds px4's stdin open so the autopilot's console can be typed into. A pipeline
+# therefore returns only when *both* stages end, and a killed autopilot left the
+# pipeline waiting on the stream: the status was unobtainable, and the first
+# version of this recorded `exit_status=unknown` on a SIGKILL it had caused
+# itself. A FIFO on the same stdin lets the autopilot be a child of this shell,
+# so its status is here the moment it ends: 137 is a SIGKILL (an OOM killer or a
+# supervisor), 139 a SIGSEGV.
+#
+# launch_px4_with_parameter_stream <cruise> <maximum> <status file> <launcher> [args]
+launch_px4_with_parameter_stream() {
+  local cruise_speed="$1"
+  local maximum_speed="$2"
+  local status_file="$3"
+  local launcher="$4"
+  shift 4
+  local fifo="${runtime_artifact_dir}/px4_stdin_${BASHPID}.fifo"
+  local stream_pid
+  local status=0
+
+  rm -f "${fifo}"
+  mkfifo -m 600 "${fifo}"
+  px4_parameter_stream "${cruise_speed}" "${maximum_speed}" > "${fifo}" 2>&1 &
+  stream_pid=$!
+  ( "${launcher}" "$@" < "${fifo}" ) || status=$?
+  kill "${stream_pid}" 2>/dev/null || true
+  wait "${stream_pid}" 2>/dev/null || true
+  rm -f "${fifo}"
+  printf 'status=%s\n' "${status}" > "${status_file}"
+}
+
 start_px4_sitl_processes() {
   local instance
 
@@ -45,16 +80,18 @@ start_px4_sitl_processes() {
     for instance in "${!multi_vehicle_ids[@]}"; do
       reset_px4_instance_state "${instance}"
       (
-        px4_parameter_stream "${multi_vehicle_px4_cruise_speeds[instance]}" \
-          "${multi_vehicle_px4_maximum_speeds[instance]}" |
-          PX4_GZ_WORLD="${world_name}" \
-            PX4_GZ_STANDALONE=1 \
-            PX4_GZ_MODEL_POSE="${multi_vehicle_gazebo_spawn_poses[instance]}" \
-            PX4_SIM_MODEL="${multi_vehicle_px4_model_targets[instance]}" \
-            PX4_UXRCE_DDS_NS="${multi_vehicle_px4_namespaces[instance]}" \
-            PX4_SYS_AUTOSTART=4001 \
-            HEADLESS="${headless}" \
-            run_px4_instance "${instance}"
+        declare -x PX4_GZ_WORLD="${world_name}"
+        declare -x PX4_GZ_STANDALONE=1
+        declare -x PX4_GZ_MODEL_POSE="${multi_vehicle_gazebo_spawn_poses[instance]}"
+        declare -x PX4_SIM_MODEL="${multi_vehicle_px4_model_targets[instance]}"
+        declare -x PX4_UXRCE_DDS_NS="${multi_vehicle_px4_namespaces[instance]}"
+        declare -x PX4_SYS_AUTOSTART=4001
+        declare -x HEADLESS="${headless}"
+        launch_px4_with_parameter_stream \
+          "${multi_vehicle_px4_cruise_speeds[instance]}" \
+          "${multi_vehicle_px4_maximum_speeds[instance]}" \
+          "${runtime_artifact_dir}/px4_job_exit_${instance}.txt" \
+          run_px4_instance "${instance}"
       ) > "${multi_vehicle_px4_logs[instance]}" 2>&1 &
       multi_vehicle_px4_pids+=("$!")
     done
@@ -63,24 +100,22 @@ start_px4_sitl_processes() {
     echo "PX4 Gazebo spawn pose: ${point_gazebo_spawn_x_m},${point_gazebo_spawn_y_m},${point_gazebo_spawn_z_m},0,0,${point_gazebo_spawn_yaw_rad}"
     reset_px4_instance_state 0
     (
-      px4_parameter_stream "${px4_active_cruise_speed_mps}" \
-        "${px4_active_max_horizontal_speed_mps}" |
-        PX4_GZ_WORLD="${world_name}" \
-        PX4_GZ_STANDALONE=1 \
-        PX4_GZ_MODEL_POSE="${point_gazebo_spawn_x_m},${point_gazebo_spawn_y_m},${point_gazebo_spawn_z_m},0,0,${point_gazebo_spawn_yaw_rad}" \
-          PX4_SIM_MODEL="${px4_model_target}" \
-          PX4_SYS_AUTOSTART=4001 \
-          HEADLESS="${headless}" \
-          run_px4_sitl
+      declare -x PX4_GZ_WORLD="${world_name}"
+      declare -x PX4_GZ_STANDALONE=1
+      declare -x PX4_GZ_MODEL_POSE="${point_gazebo_spawn_x_m},${point_gazebo_spawn_y_m},${point_gazebo_spawn_z_m},0,0,${point_gazebo_spawn_yaw_rad}"
+      declare -x PX4_SIM_MODEL="${px4_model_target}"
+      declare -x PX4_SYS_AUTOSTART=4001
+      declare -x HEADLESS="${headless}"
+      launch_px4_with_parameter_stream \
+        "${px4_active_cruise_speed_mps}" \
+        "${px4_active_max_horizontal_speed_mps}" \
+        "${runtime_artifact_dir}/px4_job_exit.txt" \
+        run_px4_sitl
     ) > "${px4_log_file}" 2>&1 &
     px4_pid=$!
   fi
 }
 
-# Waits out the startup delay, refuses a PX4 that has already gone, and names
-# the autopilot process inside the job. The autopilot is neither the job itself
-# nor its first child: `( params | env ... px4 )` puts the parameter stream
-# beside it, so the first child is that stream and killing it leaves PX4 flying.
 check_px4_sitl_started() {
   local instance
   local candidate
@@ -130,12 +165,18 @@ record_px4_exit_status() {
   # job that carried it did: a killed PX4 can leave the parameter stream beside
   # it running, and that is still a lost autopilot.
   watched="${autopilot_pid:-${job_pid}}"
+  local px4_job_exit_file="${runtime_artifact_dir}/px4_job_exit.txt"
   if px4_process_alive "${watched}"; then
     printf 'role=%s pid=%s autopilot_pid=%s phase=teardown\n' \
       "${role}" "${job_pid}" "${watched}" >> "${px4_exit_status_file}"
     return 0
   fi
-  if ! px4_process_alive "${job_pid}"; then
+  if [[ -r "${px4_job_exit_file}" ]]; then
+    status="$(sed -n 's/^status=\([0-9][0-9]*\)$/\1/p' "${px4_job_exit_file}" | head -1)"
+    [[ -n "${status}" ]] || status=unknown
+  elif ! px4_process_alive "${job_pid}"; then
+    # Reaped without the file: the status is the shell's, and it is only
+    # obtainable once the job has ended.
     status=0
     wait "${job_pid}" 2>/dev/null || status=$?
   fi

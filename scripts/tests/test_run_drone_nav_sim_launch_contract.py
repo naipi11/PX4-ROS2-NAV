@@ -603,8 +603,15 @@ class RunDroneNavSimLaunchContractTest(unittest.TestCase):
             self.text,
         )
         self.assertIn('"${px4_active_cruise_speed_mps}"', self.text)
+        # The stream is fed beside the autopilot it feeds, through the launcher
+        # that records the autopilot's own exit status
+        # (scripts/px4_liveness_runtime.sh).
         self.assertIn(
-            'px4_parameter_stream "${multi_vehicle_px4_cruise_speeds[instance]}"',
+            "launch_px4_with_parameter_stream",
+            self.text,
+        )
+        self.assertIn(
+            '"${multi_vehicle_px4_cruise_speeds[instance]}"',
             self.text,
         )
         self.assertIn(
