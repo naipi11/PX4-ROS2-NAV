@@ -18,6 +18,16 @@ assert SPEC.loader is not None
 SPEC.loader.exec_module(cleanup)
 
 
+def same_namespace(pid: int) -> bool:
+    """Every process these tests describe is in the cleanup's namespace.
+
+    The pids are fixtures, so the real /proc check would read them as belonging to
+    containers and skip all of them; the selection rules are what is under test
+    here, and the namespace rule has its own test below.
+    """
+    return True
+
+
 class GazeboProcessCleanupTest(unittest.TestCase):
     def test_matches_the_environment_demo_runner_and_the_3d_lidar_model(self) -> None:
         self.assertTrue(
@@ -46,7 +56,9 @@ class GazeboProcessCleanupTest(unittest.TestCase):
             )
         )
 
-        candidates = cleanup.select_conflicting_processes(processes, {999})
+        candidates = cleanup.select_conflicting_processes(
+            processes, {999}, same_namespace=same_namespace
+        )
 
         self.assertEqual([process.pid for process in candidates], [100, 101])
 
@@ -84,6 +96,7 @@ class GazeboProcessCleanupTest(unittest.TestCase):
         candidates = cleanup.select_conflicting_processes(
             processes,
             {999},
+            same_namespace=same_namespace,
             project_markers=["/workspace", "drone_city_nav"],
         )
 
@@ -115,6 +128,7 @@ class GazeboProcessCleanupTest(unittest.TestCase):
             processes,
             {20},
             project_markers=["/workspace", "drone_city_nav"],
+            same_namespace=same_namespace,
         )
 
         self.assertEqual([process.pid for process in candidates], [40, 50])
@@ -131,7 +145,9 @@ class GazeboProcessCleanupTest(unittest.TestCase):
             )
         )
 
-        candidates = cleanup.select_conflicting_processes(processes, {30})
+        candidates = cleanup.select_conflicting_processes(
+            processes, {30}, same_namespace=same_namespace
+        )
 
         self.assertEqual([process.pid for process in candidates], [40])
 
@@ -175,6 +191,32 @@ class GazeboProcessCleanupTest(unittest.TestCase):
 
         self.assertEqual(len(processes), 1)
         self.assertEqual(processes[0].pid, 200)
+
+
+    def test_leaves_processes_in_another_pid_namespace_alone(self) -> None:
+        """A cleanup on the host reads a container's processes through the host's ps.
+
+        A live flight's PX4, Gazebo and launcher all match the patterns there, so
+        selecting them let any cleanup on the host stop another session's flight:
+        three autopilots died of a SIGKILL with no OOM behind them (2026-11-13).
+        """
+        processes = cleanup.parse_ps_output(
+            "\n".join(
+                [
+                    "100 1 100 /usr/bin/gz sim -r -s urban_circuit_practice_01.sdf",
+                    "101 1 101 gz sim -g",
+                    "102 1 102 /workspace/external/PX4-Autopilot/build/px4_sitl_default/bin/px4 -i 0",
+                ]
+            )
+        )
+
+        candidates = cleanup.select_conflicting_processes(
+            processes,
+            {999},
+            same_namespace=lambda pid: pid != 102,
+        )
+
+        self.assertEqual([process.pid for process in candidates], [100, 101])
 
 
 if __name__ == "__main__":

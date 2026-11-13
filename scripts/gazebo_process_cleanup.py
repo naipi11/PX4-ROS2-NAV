@@ -222,22 +222,49 @@ def collect_descendant_pids(
     return descendants
 
 
+def in_own_pid_namespace(pid: int) -> bool:
+    """Whether a pid is in the namespace this cleanup runs in.
+
+    A cleanup on the host reads every container's processes through the host's
+    `ps`, and their command lines match these patterns exactly: a live flight's
+    `run_drone_nav_sim.sh`, `gz sim`, `MicroXRCEAgent` and
+    `/workspace/external/PX4-Autopilot/.../px4` all appear, 31 candidates on
+    2026-11-13 while one flight was up. Selecting them meant that any cleanup run
+    from any checkout on the host could stop another session's flight - which is
+    the SIGKILL three flights' autopilots died of with no OOM behind it (137,
+    2026-11-13). A process in another pid namespace belongs to a container, and a
+    container is stopped as a container, not process by process; a cleanup inside
+    the container sees its own processes in its own namespace and still stops them.
+    An unreadable namespace is treated as another one, so a process this cleanup
+    cannot place is left alone.
+    """
+    try:
+        return os.readlink(f"/proc/{pid}/ns/pid") == os.readlink("/proc/self/ns/pid")
+    except OSError:
+        return False
+
+
 def select_conflicting_processes(
     processes: list[ProcessInfo],
     protected_pids: set[int],
     *,
     project_markers: list[str] | None = None,
+    same_namespace=None,
 ) -> list[ProcessInfo]:
     protected = collect_ancestor_pids(processes, protected_pids)
     protected.update(collect_descendant_pids(processes, protected_pids))
     markers = (
         project_markers if project_markers is not None else default_project_markers()
     )
+    namespace_check = (
+        same_namespace if same_namespace is not None else in_own_pid_namespace
+    )
     directly_selected = [
         process
         for process in processes
         if process.pid not in protected
         and is_conflicting_simulation_process(process.cmd, markers)
+        and namespace_check(process.pid)
     ]
     selected_pids = {process.pid for process in directly_selected}
     selected_pids.update(collect_descendant_pids(processes, selected_pids))
