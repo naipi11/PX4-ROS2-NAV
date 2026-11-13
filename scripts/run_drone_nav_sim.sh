@@ -11,6 +11,8 @@ source "${repo_root}/scripts/runtime_evidence_runtime.sh"
 source "${repo_root}/scripts/video_recording_runtime.sh"
 # shellcheck source=px4_parameter_runtime.sh
 source "${repo_root}/scripts/px4_parameter_runtime.sh"
+# shellcheck source=px4_liveness_runtime.sh
+source "${repo_root}/scripts/px4_liveness_runtime.sh"
 # shellcheck source=lidar_profile_runtime.sh
 source "${repo_root}/scripts/lidar_profile_runtime.sh"
 resolve_lidar_profile
@@ -172,6 +174,7 @@ if [[ -n "${RAW_SNAPSHOT_BOUNDS_M:-}" ]]; then
   fi
 fi
 px4_log_file="${PX4_LOG_FILE:-${runtime_artifact_dir}/px4_drone_nav.log}"
+px4_exit_status_file="${runtime_artifact_dir}/px4_exit_status.txt"
 multi_vehicle_px4_logs=()
 if bool_is_true "${multi_vehicle_mission}"; then
   for instance in "${!multi_vehicle_ids[@]}"; do
@@ -575,6 +578,7 @@ cleanup() {
   cleanup_started=true
   trap - EXIT INT TERM
   stop_stack_bag_recorder
+  record_px4_exit_statuses
 
   job_pids="$(jobs -pr || true)"
   if [[ -z "${job_pids}" ]]; then
@@ -710,70 +714,9 @@ run_with_cpu_affinity "${control_cpu_list}" \
   MicroXRCEAgent udp4 -p 8888 > "${uxrce_log_file}" 2>&1 &
 
 
-echo "PX4 SITL log: ${px4_log_file}"
-if bool_is_true "${multi_vehicle_mission}"; then
-  echo "Multi-vehicle scenario: ${multi_vehicle_scenario_path}"
-  for instance in "${!multi_vehicle_ids[@]}"; do
-    echo "MULTI_VEHICLE_COORDINATE_CONTRACT vehicle_id='${multi_vehicle_ids[instance]}' map_start='${multi_vehicle_map_start_poses[instance]}' gazebo_spawn='${multi_vehicle_gazebo_spawn_poses[instance]}' gazebo_model='${multi_vehicle_gazebo_model_names[instance]}'"
-    echo "PX4 SITL log for ${multi_vehicle_ids[instance]}: ${multi_vehicle_px4_logs[instance]}"
-  done
-  multi_vehicle_px4_cruise_speeds=()
-  multi_vehicle_px4_maximum_speeds=()
-  for instance in "${!multi_vehicle_ids[@]}"; do
-    multi_vehicle_px4_cruise_speeds+=("${px4_active_cruise_speed_mps}")
-    multi_vehicle_px4_maximum_speeds+=("${px4_active_max_horizontal_speed_mps}")
-  done
-  multi_vehicle_px4_pids=()
-  for instance in "${!multi_vehicle_ids[@]}"; do
-    reset_px4_instance_state "${instance}"
-    (
-      px4_parameter_stream "${multi_vehicle_px4_cruise_speeds[instance]}" \
-        "${multi_vehicle_px4_maximum_speeds[instance]}" |
-        PX4_GZ_WORLD="${world_name}" \
-          PX4_GZ_STANDALONE=1 \
-          PX4_GZ_MODEL_POSE="${multi_vehicle_gazebo_spawn_poses[instance]}" \
-          PX4_SIM_MODEL="${multi_vehicle_px4_model_targets[instance]}" \
-          PX4_UXRCE_DDS_NS="${multi_vehicle_px4_namespaces[instance]}" \
-          PX4_SYS_AUTOSTART=4001 \
-          HEADLESS="${headless}" \
-          run_px4_instance "${instance}"
-    ) > "${multi_vehicle_px4_logs[instance]}" 2>&1 &
-    multi_vehicle_px4_pids+=("$!")
-  done
-  px4_pid="${multi_vehicle_px4_pids[0]}"
-else
-  echo "PX4 Gazebo spawn pose: ${point_gazebo_spawn_x_m},${point_gazebo_spawn_y_m},${point_gazebo_spawn_z_m},0,0,${point_gazebo_spawn_yaw_rad}"
-  reset_px4_instance_state 0
-  (
-    px4_parameter_stream "${px4_active_cruise_speed_mps}" \
-      "${px4_active_max_horizontal_speed_mps}" |
-      PX4_GZ_WORLD="${world_name}" \
-      PX4_GZ_STANDALONE=1 \
-      PX4_GZ_MODEL_POSE="${point_gazebo_spawn_x_m},${point_gazebo_spawn_y_m},${point_gazebo_spawn_z_m},0,0,${point_gazebo_spawn_yaw_rad}" \
-        PX4_SIM_MODEL="${px4_model_target}" \
-        PX4_SYS_AUTOSTART=4001 \
-        HEADLESS="${headless}" \
-        run_px4_sitl
-  ) > "${px4_log_file}" 2>&1 &
-  px4_pid=$!
-fi
+start_px4_sitl_processes
 
-sleep "${startup_sleep_s}"
-
-if ! kill -0 "${px4_pid}" 2>/dev/null; then
-  echo "PX4 SITL exited before ROS launch. Last PX4 log lines:" >&2
-  tail -n 80 "${px4_log_file}" >&2
-  exit 1
-fi
-if bool_is_true "${multi_vehicle_mission}"; then
-  for instance in "${!multi_vehicle_ids[@]}"; do
-    if ! kill -0 "${multi_vehicle_px4_pids[instance]}" 2>/dev/null; then
-      echo "${multi_vehicle_px4_namespaces[instance]} PX4 SITL exited before ROS launch. Last log lines:" >&2
-      tail -n 80 "${multi_vehicle_px4_logs[instance]}" >&2
-      exit 1
-    fi
-  done
-fi
+check_px4_sitl_started
 
 if bool_is_true "${enable_gz_scene_diagnostics}"; then
   if ! capture_gazebo_scene_diagnostics "${repo_root}" "${world_name}" \
