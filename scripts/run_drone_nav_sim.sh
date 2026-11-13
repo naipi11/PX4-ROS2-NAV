@@ -869,6 +869,19 @@ if [[ "${smoke_duration_s}" != "0" ]]; then
       fi
       exit 0
     fi
+    # A completed flight ends here, not only at the timeout: the mission
+    # monitor exits with its result and the launch follows it down. The
+    # acceptance check decides the status, so a flight that landed on its goal
+    # is not reported as a failure and one that destroyed the vehicle is not
+    # reported as a pass. Any other non-zero exit is still the fault it was.
+    if [[ -n "${headless}" ]] &&
+      headless_launch_reached_terminal_outcome "${ros_log_file}"; then
+      echo "Flight ended with a terminal mission result; validating it."
+      if check_headless_run; then
+        exit 0
+      fi
+      exit 1
+    fi
     print_log_tail "ROS launch" "${ros_log_file}"
     exit "${exit_code}"
   }

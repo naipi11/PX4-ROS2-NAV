@@ -135,6 +135,25 @@ print_log_tail() {
     | tail -n 80 >&2 || true
 }
 
+# A launch that ends on a terminal mission result is the flight ending, not a
+# fault: the mission monitor publishes MISSION_RESULT, exits, and the launch
+# shuts down with it, so ros2 launch returns non-zero for a flight that landed
+# on its goal. Until this was read, every urban point-to-point flight reported
+# failure while its own result said success, and because the acceptance check
+# ran only on the 124 timeout branch it never ran at all: MISSION_CHECK was
+# inert. The predicate below is what the launcher uses to tell that ending from
+# a fault; the acceptance check then decides, not the launch's status.
+headless_launch_reached_terminal_outcome() {
+  local log="$1"
+
+  [[ -r "${log}" ]] || return 1
+  # The monitor's own result line, its clean exit, and the handler that takes
+  # the launch down with it. A node that died takes none of the three.
+  grep -q "MISSION_RESULT " "${log}" || return 1
+  grep -q "Mission monitor exited; shutting down" "${log}" || return 1
+  grep -q "process has finished cleanly" "${log}" || return 1
+}
+
 check_headless_run() {
   # The true pose is saved every two seconds and once more when its capture
   # is stopped; the check reads it up to the flight's last acknowledgement, so

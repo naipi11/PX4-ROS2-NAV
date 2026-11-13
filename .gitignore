@@ -8,6 +8,13 @@ log-*/
 .colcon/
 *.colcon
 
+# Remote-simulation marker: written beside the checkout by the other machine
+# that drives this simulator, not by anything here. It sits at the repository
+# root, so leaving it untracked empties no acceptance run: the check reads
+# `git status --porcelain` with untracked files, and one stray file fails every
+# flight for a reason that has nothing to do with the flight.
+.remote-sim-managed
+
 # Local agent transport
 .agent-io/
 
