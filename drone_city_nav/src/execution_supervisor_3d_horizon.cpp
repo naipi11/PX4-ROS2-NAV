@@ -91,7 +91,27 @@ timedExecutionPathPoints(const FiniteExecutionEvidenceView3D& view) {
 // trajectory has not yet reached points the clock has passed, and skipping
 // their sweep would leave new evidence on ground it is still going to cover
 // unchecked. The commit revalidation sweeps the whole horizon.
-[[nodiscard]] bool revalidateFiniteExecution(
+// Why the latest-evidence revalidation refused, and the verdict of the sweep that
+// refused it.
+//
+// A path that meets occupied evidence is evidence about the world, and a stop is
+// the right answer; a sweep that could not be made, or a path refused for a
+// broken contract or a dynamics law no body would satisfy, is a property of the
+// tick, and the next tick may publish. Half the stops of 2026-11-13 (865 of 1691)
+// followed a refusal here, and the stage name alone could not tell the two apart.
+struct RevalidationFailure3D {
+  const char* view{nullptr};
+  FiniteExecutionPathStatus3D status{FiniteExecutionPathStatus3D::kValid};
+
+  [[nodiscard]] bool accepted() const noexcept {
+    return view == nullptr;
+  }
+};
+
+// Names the clause that makes the sweep impossible, or nullptr when it can run.
+// The sweep itself reports the path's own verdict separately: a path refused for
+// a collision is evidence about the world, a sweep refused here is the tick.
+[[nodiscard]] const char* revalidationPreconditionFailure3D(
     const FiniteExecutionEvidenceView3D& view,
     const std::shared_ptr<const VersionedObservedRawWorld3D>& latest_raw,
     const std::shared_ptr<const VersionedLatestSensorEvidence3D>& latest_sensor) {
@@ -101,17 +121,30 @@ timedExecutionPathPoints(const FiniteExecutionEvidenceView3D& view) {
       view.control_interval_ns <= 0 ||
       view.horizon->states.size() != view.horizon->controls.size() + 1U ||
       view.horizon->controls.empty()) {
-    return false;
+    return "view_incomplete";
   }
   const bool static_world = view.static_world != nullptr;
   if ((!static_world && (latest_raw == nullptr || !latest_raw->valid())) ||
       (static_world && !view.static_world->valid())) {
-    return false;
+    return "raw_world_unavailable";
   }
+  if (timedExecutionPathPoints(view).empty()) {
+    return "path_points_empty";
+  }
+  return nullptr;
+}
+
+// Whether the sweep can be made from the world as it now stands, and its verdict.
+[[nodiscard]] RevalidationFailure3D revalidateFiniteExecutionView(
+    const FiniteExecutionEvidenceView3D& view,
+    const std::shared_ptr<const VersionedObservedRawWorld3D>& latest_raw,
+    const std::shared_ptr<const VersionedLatestSensorEvidence3D>& latest_sensor) {
+  if (const char* const precondition =
+          revalidationPreconditionFailure3D(view, latest_raw, latest_sensor)) {
+    return {precondition, FiniteExecutionPathStatus3D::kValid};
+  }
+  const bool static_world = view.static_world != nullptr;
   const std::vector<TimedExecutionPathPoint3D> points = timedExecutionPathPoints(view);
-  if (points.empty()) {
-    return false;
-  }
   const std::optional<LaunchSupportContact3D>& launch_support =
       !static_world ? latest_raw->launchSupportContact()
                     : std::optional<LaunchSupportContact3D>{};
@@ -143,41 +176,76 @@ timedExecutionPathPoints(const FiniteExecutionEvidenceView3D& view) {
       .latest_sensor_obstacle_points = latest_sensor->indexedHitPoints(),
       .terminal_boundary = std::nullopt,
   };
-  return validateCompleteFiniteExecutionPath3D(
-             points, view.execution_input->previousControl(), world)
-      .accepted();
+  const FiniteExecutionPathValidation3D validation =
+      validateCompleteFiniteExecutionPath3D(
+          points, view.execution_input->previousControl(), world);
+  if (!validation.accepted()) {
+    return {"path_rejected", validation.status};
+  }
+  return {};
 }
 
-[[nodiscard]] bool revalidateFiniteExecution(
+[[nodiscard]] RevalidationFailure3D revalidationFailure(
     const ExecutionPlan3D& snapshot,
     const std::shared_ptr<const VersionedObservedRawWorld3D>& latest_raw,
     const std::shared_ptr<const VersionedLatestSensorEvidence3D>& latest_sensor) {
   if (const FiniteExecutionState3D* const execution = snapshot.finiteExecution()) {
     const FiniteExecutionState3D* const braking = snapshot.brakingFallback();
     if (braking == nullptr) {
-      return false;
+      // Every published planned horizon is required to carry a braking fallback
+      // (execution_horizon_assembler_3d.cpp), so this names a plan built another
+      // way rather than a missing sweep.
+      return {"braking_fallback_absent", FiniteExecutionPathStatus3D::kValid};
     }
     std::optional<FiniteExecutionEvidenceView3D> command =
         finiteExecutionEvidenceView(*execution);
     std::optional<FiniteExecutionEvidenceView3D> fallback =
         finiteExecutionEvidenceView(*braking);
-    if (command.has_value()) {
-      command->route = snapshot.route();
+    if (!command.has_value()) {
+      return {"command_view_unavailable", FiniteExecutionPathStatus3D::kValid};
     }
-    if (fallback.has_value()) {
-      fallback->route = snapshot.route();
+    if (!fallback.has_value()) {
+      return {"braking_fallback_view_unavailable", FiniteExecutionPathStatus3D::kValid};
     }
-    return command.has_value() && fallback.has_value() &&
-           revalidateFiniteExecution(*command, latest_raw, latest_sensor) &&
-           revalidateFiniteExecution(*fallback, latest_raw, latest_sensor);
+    command->route = snapshot.route();
+    fallback->route = snapshot.route();
+    if (const RevalidationFailure3D refused =
+            revalidateFiniteExecutionView(*command, latest_raw, latest_sensor);
+        !refused.accepted()) {
+      // kValid means the sweep never ran: what refused is the precondition, and
+      // it says so itself.
+      return {refused.status == FiniteExecutionPathStatus3D::kValid
+                  ? refused.view
+                  : "command_path_rejected",
+              refused.status};
+    }
+    if (const RevalidationFailure3D refused =
+            revalidateFiniteExecutionView(*fallback, latest_raw, latest_sensor);
+        !refused.accepted()) {
+      return {refused.status == FiniteExecutionPathStatus3D::kValid
+                  ? refused.view
+                  : "braking_fallback_path_rejected",
+              refused.status};
+    }
+    return {};
   }
   // A stop carries no braking fallback of its own: it is the fallback, and its
   // evidence is the same swept body against the newest world.
   if (const StopExecution3D* const stop = snapshot.stopExecution()) {
     const std::optional<FiniteExecutionEvidenceView3D> view =
         finiteExecutionEvidenceView(*stop);
-    return view.has_value() &&
-           revalidateFiniteExecution(*view, latest_raw, latest_sensor);
+    if (!view.has_value()) {
+      return {"stop_view_unavailable", FiniteExecutionPathStatus3D::kValid};
+    }
+    const RevalidationFailure3D refused =
+        revalidateFiniteExecutionView(*view, latest_raw, latest_sensor);
+    if (refused.accepted()) {
+      return {};
+    }
+    return {refused.status == FiniteExecutionPathStatus3D::kValid
+                ? refused.view
+                : "stop_path_rejected",
+            refused.status};
   }
   // A stationary hold executes no path; its evidence on the newest world is
   // the body at the hold position staying clear of raw occupancy. Without this
@@ -188,17 +256,27 @@ timedExecutionPathPoints(const FiniteExecutionEvidenceView3D& view) {
   if (hold == nullptr || !hold->valid() || hold->terminal_execution_input == nullptr ||
       hold->validation_policy == nullptr || latest_sensor == nullptr ||
       !latest_sensor->valid()) {
-    return false;
+    return {"hold_state_incomplete", FiniteExecutionPathStatus3D::kValid};
   }
   const bool static_world = hold->static_world != nullptr;
   if ((!static_world && (latest_raw == nullptr || !latest_raw->valid())) ||
       (static_world && !hold->static_world->valid())) {
-    return false;
+    return {"hold_raw_unavailable", FiniteExecutionPathStatus3D::kValid};
   }
-  return execution_route_snapshot_3d_internal::stationaryHoldRawSafe(
-      hold->position, *hold->terminal_execution_input,
-      static_world ? nullptr : latest_raw.get(), hold->static_world.get(),
-      *hold->validation_policy, *latest_sensor);
+  if (!execution_route_snapshot_3d_internal::stationaryHoldRawSafe(
+          hold->position, *hold->terminal_execution_input,
+          static_world ? nullptr : latest_raw.get(), hold->static_world.get(),
+          *hold->validation_policy, *latest_sensor)) {
+    return {"hold_position_unsafe", FiniteExecutionPathStatus3D::kValid};
+  }
+  return {};
+}
+
+[[nodiscard]] bool revalidateFiniteExecution(
+    const ExecutionPlan3D& snapshot,
+    const std::shared_ptr<const VersionedObservedRawWorld3D>& latest_raw,
+    const std::shared_ptr<const VersionedLatestSensorEvidence3D>& latest_sensor) {
+  return revalidationFailure(snapshot, latest_raw, latest_sensor).accepted();
 }
 
 [[nodiscard]] std::shared_ptr<const VersionedObservedRawWorld3D>
@@ -453,6 +531,49 @@ reject(const ExecutionHorizonCommitStatus3D status,
 }
 
 } // namespace
+
+// The refusal as the log and the register ask for it: the world's answer when the
+// sweep ran, and the clause itself when it could not.
+[[nodiscard]] const char*
+revalidationFailureClause3D(const RevalidationFailure3D& failure) noexcept {
+  if (failure.view == nullptr) {
+    return nullptr;
+  }
+  if (failure.status == FiniteExecutionPathStatus3D::kValid) {
+    return failure.view;
+  }
+  // The two occupied verdicts are different facts: the persistent raw world is the
+  // map the flight is flying against, and its collision is a stop the route must
+  // answer; the latest sensor's points are one scan, and a path refused for them
+  // is a flinch that the next scan may lift. Which one a stop followed says
+  // whether the stop was the world's answer or a reaction to one frame.
+  switch (failure.status) {
+    case FiniteExecutionPathStatus3D::kRawCollision:
+      return "path_meets_persistent_raw_evidence";
+    case FiniteExecutionPathStatus3D::kLatestSensorRawCollision:
+      return "path_meets_latest_sensor_evidence";
+    case FiniteExecutionPathStatus3D::kValid:
+      return failure.view;
+    case FiniteExecutionPathStatus3D::kInvalidContract:
+    case FiniteExecutionPathStatus3D::kDynamicsInconsistent:
+    case FiniteExecutionPathStatus3D::kCandidateRejected:
+    case FiniteExecutionPathStatus3D::kNotActive:
+    case FiniteExecutionPathStatus3D::kRouteEndpointExceeded:
+    case FiniteExecutionPathStatus3D::kFlightEnvelopeViolation:
+    case FiniteExecutionPathStatus3D::kDynamicFlightEnvelopeViolation:
+    case FiniteExecutionPathStatus3D::kRawWorldUnavailable:
+      return "path_refused_mechanically";
+  }
+  return "path_refused_mechanically";
+}
+
+const char* evidenceRevalidationFailure3D(
+    const ExecutionPlan3D& plan,
+    const std::shared_ptr<const VersionedObservedRawWorld3D>& latest_raw,
+    const std::shared_ptr<const VersionedLatestSensorEvidence3D>&
+        latest_sensor) noexcept {
+  return revalidationFailure(plan, latest_raw, latest_sensor).view;
+}
 
 const char*
 previousControlEvidenceFailure3D(const VersionedExecutionInput3D& input,
@@ -753,9 +874,12 @@ ExecutionSupervisor3D::commitHorizon(ExecutionHorizonCommitRequest3D request) {
       result.publication_currentness ==
           ExecutionPublicationCurrentnessStatus3D::kRevalidationRequired) {
     const auto revalidation_started = std::chrono::steady_clock::now();
-    result.latest_evidence_revalidated =
-        revalidateFiniteExecution(*publication_plan, request.current_observed_raw_world,
-                                  request.current_sensor_evidence);
+    const RevalidationFailure3D revalidation =
+        revalidationFailure(*publication_plan, request.current_observed_raw_world,
+                            request.current_sensor_evidence);
+    result.latest_evidence_revalidated = revalidation.accepted();
+    result.evidence_revalidation_failure = revalidationFailureClause3D(revalidation);
+    result.evidence_revalidation_view = revalidation.view;
     result.revalidation_ms =
         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() -
                                                   revalidation_started)

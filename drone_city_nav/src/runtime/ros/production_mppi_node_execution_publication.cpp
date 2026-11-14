@@ -510,11 +510,22 @@ ProductionMppiHorizonCommitStatus ProductionMppiNode::commitAndPublishExecutionH
     if (committed.status == ExecutionHorizonCommitStatus3D::kEvidenceNotCurrent) {
       const std::string_view currentness = executionPublicationCurrentnessStatus3DName(
           committed.publication_currentness);
-      RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000,
-                           "EXECUTION_HORIZON_COMMIT evidence_currentness=%.*s "
-                           "latest_evidence_revalidated=%s",
-                           static_cast<int>(currentness.size()), currentness.data(),
-                           committed.latest_evidence_revalidated ? "true" : "false");
+      // Which view the sweep refused and on what verdict. A stop follows this
+      // refusal, so the difference matters: a path that meets occupied evidence
+      // is a stop the world asked for, and a sweep that could not be made, or a
+      // path refused for a broken contract, is a tick the next one may publish.
+      RCLCPP_WARN_THROTTLE(
+          get_logger(), *get_clock(), 1000,
+          "EXECUTION_HORIZON_COMMIT evidence_currentness=%.*s "
+          "latest_evidence_revalidated=%s revalidation_clause=%s refused_view=%s",
+          static_cast<int>(currentness.size()), currentness.data(),
+          committed.latest_evidence_revalidated ? "true" : "false",
+          committed.evidence_revalidation_failure != nullptr
+              ? committed.evidence_revalidation_failure
+              : "none",
+          committed.evidence_revalidation_view != nullptr
+              ? committed.evidence_revalidation_view
+              : "none");
     }
     report_commit_failure(executionHorizonCommitStatus3DName(committed.status));
     return ProductionMppiHorizonCommitStatus::kRejected;

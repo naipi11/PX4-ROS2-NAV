@@ -111,6 +111,19 @@ struct ExecutionHorizonCommitResult3D {
   ExecutionRoutePublicationStatus3D lease_status{
       ExecutionRoutePublicationStatus3D::kInvalidCandidate};
   bool latest_evidence_revalidated{false};
+  // Why the latest-evidence revalidation refused, or nullptr when it did not run
+  // or did not fail; the boolean above is derived from it. Half the stops of
+  // 2026-11-13 (865 of 1691) followed a refusal here, and the stage name alone
+  // could not say whether the published path met new evidence - a stop the world
+  // asked for - or the sweep could not be made, which is a tick the next one may
+  // publish. `path_meets_occupied_evidence` and `path_refused_mechanically` are
+  // the sweep's own two answers; the rest name the clause that stopped it, or the
+  // view it could not build.
+  const char* evidence_revalidation_failure{nullptr};
+  // Which view the refusal was about: "command", "braking_fallback", "stop" or
+  // "hold", or nullptr when no view was reached. Plain text because these headers
+  // are independent of the controller (test_navigation_dependency_contract.py).
+  const char* evidence_revalidation_view{nullptr};
   // Wall time of the latest-evidence revalidation sweep, zero when it did not
   // run, for the tick phase diagnostics.
   double revalidation_ms{0.0};
@@ -156,6 +169,16 @@ struct ExecutionHorizonCommitResult3D {
     const AppliedControlEvidence3D& resident_control,
     const ExecutionOwnerIdentity3D& resident_owner, std::int64_t now_ns,
     double maximum_control_feedback_age_ms, bool stationary_capture_rearm) noexcept;
+
+// Why the latest-evidence revalidation would refuse the execution this plan
+// published, or nullptr when it can be made against that evidence. The commit's
+// `latest_evidence_revalidated` is this being nullptr; a caller that has to tell a
+// stop the world asked for from a tick that could not be revalidated reads it here.
+[[nodiscard]] const char* evidenceRevalidationFailure3D(
+    const ExecutionPlan3D& plan,
+    const std::shared_ptr<const VersionedObservedRawWorld3D>& latest_raw,
+    const std::shared_ptr<const VersionedLatestSensorEvidence3D>&
+        latest_sensor) noexcept;
 
 // Names the first predicate that makes the applied-control evidence
 // non-authoritative for this owner, or returns nullptr when it is

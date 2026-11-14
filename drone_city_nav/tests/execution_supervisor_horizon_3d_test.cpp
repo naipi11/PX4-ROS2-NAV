@@ -222,6 +222,39 @@ TEST(ExecutionSupervisorHorizon3DTest,
   EXPECT_EQ(supervisor.plan(), transition.next);
 }
 
+// The revalidation's verdict must name which view refused and why, and the
+// commit's boolean must be that verdict's: half the stops of 2026-11-13 followed
+// this refusal, and the stage name alone could not tell a path meeting occupied
+// evidence from a tick whose sweep could not be made.
+TEST(ExecutionSupervisorHorizon3DTest, TheEvidenceRevalidationNamesTheViewItRefused) {
+  SnapshotFixture3D fixture;
+  ExecutionSupervisor3D supervisor;
+  const std::shared_ptr<const CommittedExecutionAuthority3D> authority =
+      supervisor.authority();
+  ASSERT_NE(authority, nullptr);
+  const ExecutionRouteTransitionResult3D transition =
+      activeTransition(*authority->plan(), fixture);
+  ASSERT_TRUE(transition.applied());
+  ExecutionHorizonCommitRequest3D request = transitionRequest(authority, transition);
+  ASSERT_NE(request.current_sensor_evidence, nullptr);
+  ASSERT_NE(request.current_observed_raw_world, nullptr);
+
+  // On the evidence the plan was certified against, the sweep is makeable.
+  EXPECT_EQ(evidenceRevalidationFailure3D(*transition.next,
+                                          request.current_observed_raw_world,
+                                          request.current_sensor_evidence),
+            nullptr);
+
+  // Without sensor evidence no view can be built, and that is what it says: a
+  // tick, not the world.
+  EXPECT_STREQ(evidenceRevalidationFailure3D(
+                   *transition.next, request.current_observed_raw_world, nullptr),
+               "view_incomplete");
+  EXPECT_STREQ(evidenceRevalidationFailure3D(*transition.next, nullptr,
+                                             request.current_sensor_evidence),
+               "raw_world_unavailable");
+}
+
 TEST(ExecutionSupervisorHorizon3DTest,
      RevalidatesFinitePathsWhenCurrentEvidenceAdvancesOnTheSameLineage) {
   SnapshotFixture3D fixture;
