@@ -64,54 +64,38 @@ bool_is_true() {
   [[ "$1" == "true" || "$1" == "1" ]]
 }
 
-# A container of this repository: it runs the dev image or mounts the
-# repository as its workspace. Only such containers are ever stopped, whatever
-# their command says.
+# A container of this repository.
+#
+# The pattern alone - PX4-Autopilot, px4_sitl, gz sim, ros2 launch drone_city_nav -
+# matches another session's flight as surely as ours, and the wrappers run this
+# cleanup before and after every flight. The first repository check was the image
+# or the workspace mount, and the image does not tell the checkouts apart: every
+# checkout on this host runs drone-gazebo-dev, so one session's cleanup could stop
+# another's flight and the flight reads it as an autopilot that left with no
+# message. What does tell them apart is the mount: container_run.sh mounts the
+# repository root at /workspace, so a container that mounts neither the root nor
+# anything under it belongs to someone else and is left alone.
 container_belongs_to_repository() {
   local container_id="$1"
   local identity_text
-  identity_text="$(
-    timeout "${docker_command_timeout_s}s" docker inspect \
-      --format '{{.Config.Image}} {{range .Mounts}}{{.Source}} {{end}}' \
-      "${container_id}" 2>/dev/null || true
-  )"
-  [[ "${identity_text}" == *"${dev_image_name}"* ||
-    "${identity_text}" == *"${repo_root} "* ]]
-}
-
-# Whether a container was started from this repository.
-#
-# The selection below used to be the process patterns alone, over every container
-# on the host: another session's flight - a second checkout, or the AirSim
-# simulator a user drives beside this one - matches PX4-Autopilot or px4_sitl as
-# surely as ours, and the wrappers run this cleanup before and after every flight.
-# A simulator stopped from another checkout is the "autopilot went away with no
-# message" that no log explains, and one AirSim instance was lost that way on
-# 2026-11-12. This repository's containers mount the repository root at
-# /workspace (container_run.sh), so a container that mounts neither the root nor
-# anything under it belongs to someone else and is left alone.
-container_belongs_to_this_repository() {
-  local container_id="$1"
-  local mounts
   local resolved_root
   local mount_source
 
-  mounts="$(
+  identity_text="$(
     timeout "${docker_command_timeout_s}s" docker inspect \
-      --format '{{range .Mounts}}{{.Source}}
-{{end}}' "${container_id}" 2>/dev/null || true
+      --format '{{range .Mounts}}{{.Source}} {{end}}' \
+      "${container_id}" 2>/dev/null || true
   )"
-  [[ -n "${mounts}" ]] || return 1
+  [[ -n "${identity_text// /}" ]] || return 1
   resolved_root="$(realpath -m -- "${repo_root}" 2>/dev/null || printf '%s' "${repo_root}")"
-  while IFS= read -r mount_source; do
-    [[ -n "${mount_source}" ]] || continue
+  for mount_source in ${identity_text}; do
     if [[ "${mount_source}" == "${repo_root}" ||
       "${mount_source}" == "${resolved_root}" ||
       "${mount_source}" == "${repo_root}/"* ||
       "${mount_source}" == "${resolved_root}/"* ]]; then
       return 0
     fi
-  done <<< "${mounts}"
+  done
   return 1
 }
 
@@ -159,8 +143,7 @@ stop_stale_simulation_containers() {
   local selected_ids=()
   local container_id
   for container_id in "${container_ids[@]}"; do
-    if container_belongs_to_this_repository "${container_id}" &&
-      container_has_simulation_processes "${container_id}"; then
+    if container_has_simulation_processes "${container_id}"; then
       selected_ids+=("${container_id}")
     fi
   done

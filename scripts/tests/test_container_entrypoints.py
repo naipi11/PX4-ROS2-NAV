@@ -69,13 +69,16 @@ class ContainerEntrypointTest(unittest.TestCase):
     def test_container_cleanup_matches_every_sim_target_of_this_repository(self) -> None:
         text = self.read_script("cleanup_sim_processes.sh")
 
-        # A container is a candidate only when it belongs to this repository
-        # (its image or its workspace mount), and any Makefile sim-* target
-        # marks it; the former pattern named only sim-gui and sim-headless.
+        # A container is a candidate only when it mounts this repository, and any
+        # Makefile sim-* target marks it; the former pattern named only sim-gui
+        # and sim-headless.
         self.assertIn("container_belongs_to_repository", text)
         # The stopped processes' Fast DDS segments go with them (5.6 GB left on the host on 2026-11-06).
         self.assertIn('python3 "${repo_root}/scripts/fastdds_shm_cleanup.py" || true', text)
-        self.assertIn('{{.Config.Image}} {{range .Mounts}}{{.Source}} {{end}}', text)
+        # The mount tells one checkout from another; the image does not, because
+        # every checkout on a host runs the same dev image (2026-11-14).
+        self.assertIn("--format '{{range .Mounts}}{{.Source}} {{end}}'", text)
+        self.assertNotIn("{{.Config.Image}}", text)
         self.assertIn("make[\",[:space:]]+sim-[a-z0-9-]+", text)
         self.assertNotIn("sim-(gui|headless)", text)
         self.assertIn("docker rm -f", text)
