@@ -270,13 +270,6 @@ struct RevalidationFailure3D {
   return {};
 }
 
-[[nodiscard]] bool revalidateFiniteExecution(
-    const ExecutionPlan3D& snapshot,
-    const std::shared_ptr<const VersionedObservedRawWorld3D>& latest_raw,
-    const std::shared_ptr<const VersionedLatestSensorEvidence3D>& latest_sensor) {
-  return revalidationFailure(snapshot, latest_raw, latest_sensor).accepted();
-}
-
 [[nodiscard]] std::shared_ptr<const VersionedObservedRawWorld3D>
 snapshotRawOwner(const ExecutionPlan3D& snapshot) {
   if (const StationaryExecutionHold3D* const hold = snapshot.stationaryHold()) {
