@@ -91,14 +91,10 @@ timedExecutionPathPoints(const FiniteExecutionEvidenceView3D& view) {
 // trajectory has not yet reached points the clock has passed, and skipping
 // their sweep would leave new evidence on ground it is still going to cover
 // unchecked. The commit revalidation sweeps the whole horizon.
-// Why the latest-evidence revalidation refused, and the verdict of the sweep that
-// refused it.
-//
-// A path that meets occupied evidence is evidence about the world, and a stop is
-// the right answer; a sweep that could not be made, or a path refused for a
-// broken contract or a dynamics law no body would satisfy, is a property of the
-// tick, and the next tick may publish. Half the stops of 2026-11-13 (865 of 1691)
-// followed a refusal here, and the stage name alone could not tell the two apart.
+// What the latest-evidence revalidation refused, and the verdict that refused it.
+// A path meeting occupied evidence is the world's answer; a sweep that could not
+// be made, or a path refused for a broken contract, is a property of the tick.
+// Half the stops of 2026-11-13 (865 of 1691) followed a refusal here.
 struct RevalidationFailure3D {
   const char* view{nullptr};
   FiniteExecutionPathStatus3D status{FiniteExecutionPathStatus3D::kValid};
@@ -109,12 +105,13 @@ struct RevalidationFailure3D {
 };
 
 // Names the clause that makes the sweep impossible, or nullptr when it can run.
-// The sweep itself reports the path's own verdict separately: a path refused for
-// a collision is evidence about the world, a sweep refused here is the tick.
+// The points are the caller's, built once per view: a reserve and a fill of every
+// horizon point, on a tick measured at a p99 of 19.97 ms against a 20 ms period.
 [[nodiscard]] const char* revalidationPreconditionFailure3D(
     const FiniteExecutionEvidenceView3D& view,
     const std::shared_ptr<const VersionedObservedRawWorld3D>& latest_raw,
-    const std::shared_ptr<const VersionedLatestSensorEvidence3D>& latest_sensor) {
+    const std::shared_ptr<const VersionedLatestSensorEvidence3D>& latest_sensor,
+    const std::vector<TimedExecutionPathPoint3D>& points) {
   if (view.horizon == nullptr || view.execution_input == nullptr ||
       view.policy == nullptr || !view.policy->valid() || view.footprint == nullptr ||
       latest_sensor == nullptr || !latest_sensor->valid() ||
@@ -128,7 +125,7 @@ struct RevalidationFailure3D {
       (static_world && !view.static_world->valid())) {
     return "raw_world_unavailable";
   }
-  if (timedExecutionPathPoints(view).empty()) {
+  if (points.empty()) {
     return "path_points_empty";
   }
   return nullptr;
@@ -139,12 +136,13 @@ struct RevalidationFailure3D {
     const FiniteExecutionEvidenceView3D& view,
     const std::shared_ptr<const VersionedObservedRawWorld3D>& latest_raw,
     const std::shared_ptr<const VersionedLatestSensorEvidence3D>& latest_sensor) {
+  // Built once: timedExecutionPathPoints answers empty for a view it cannot build.
+  const std::vector<TimedExecutionPathPoint3D> points = timedExecutionPathPoints(view);
   if (const char* const precondition =
-          revalidationPreconditionFailure3D(view, latest_raw, latest_sensor)) {
+          revalidationPreconditionFailure3D(view, latest_raw, latest_sensor, points)) {
     return {precondition, FiniteExecutionPathStatus3D::kValid};
   }
   const bool static_world = view.static_world != nullptr;
-  const std::vector<TimedExecutionPathPoint3D> points = timedExecutionPathPoints(view);
   const std::optional<LaunchSupportContact3D>& launch_support =
       !static_world ? latest_raw->launchSupportContact()
                     : std::optional<LaunchSupportContact3D>{};
